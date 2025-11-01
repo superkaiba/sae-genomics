@@ -1,0 +1,29 @@
+# Configuration for Tahoe X1 70M model
+
+model:
+  name: "tahoe-x1-70m"
+  size: "70M"
+
+  # Model architecture
+  n_params: 70_000_000
+  context_length: 1024
+  d_model: 512
+  n_layers: 12
+  n_heads: 8
+
+  # Model loading
+  checkpoint_path: null  # Path to model checkpoint, if available
+  from_pretrained: true
+  cache_dir: "./data/models"
+
+  # Device configuration
+  device: "auto"  # auto, cuda, cpu, mps
+  dtype: "float32"  # float32, bfloat16, float16
+
+  # For activation extraction
+  hook_points:
+    - "blocks.0.hook_mlp_out"
+    - "blocks.3.hook_mlp_out"
+    - "blocks.6.hook_mlp_out"
+    - "blocks.9.hook_mlp_out"
+    - "blocks.11.hook_mlp_out"

@@ -1,0 +1,34 @@
+# Configuration for Tahoe X1 3B model
+
+model:
+  name: "tahoe-x1-3b"
+  size: "3B"
+
+  # Model architecture
+  n_params: 3_000_000_000
+  context_length: 2048
+  d_model: 2048
+  n_layers: 32
+  n_heads: 32
+
+  # Model loading
+  checkpoint_path: null  # Path to model checkpoint, if available
+  from_pretrained: true
+  cache_dir: "./data/models"
+
+  # Device configuration
+  device: "auto"  # auto, cuda, cpu, mps
+  dtype: "bfloat16"  # float32, bfloat16, float16
+
+  # For distributed training
+  distributed:
+    enabled: true
+    strategy: "fsdp"  # fsdp, deepspeed
+
+  # For activation extraction
+  hook_points:
+    - "blocks.0.hook_mlp_out"
+    - "blocks.7.hook_mlp_out"
+    - "blocks.15.hook_mlp_out"
+    - "blocks.23.hook_mlp_out"
+    - "blocks.31.hook_mlp_out"

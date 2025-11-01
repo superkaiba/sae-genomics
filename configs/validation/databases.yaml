@@ -1,0 +1,108 @@
+# Database configuration for biological validation
+
+databases:
+  # Tier 1: Core databases with best APIs
+  open_targets:
+    enabled: true
+    api_url: "https://api.platform.opentargets.org/api/v4/graphql"
+    cache_dir: "./data/validation_cache/open_targets"
+    cache_ttl: 604800  # 7 days in seconds
+    timeout: 30
+
+  hpo:
+    enabled: true
+    api_url: "https://hpo.jax.org/api"
+    obo_file: "./data/databases/hp.obo"  # Downloaded HPO ontology
+    cache_dir: "./data/validation_cache/hpo"
+    auto_download: true
+
+  gwas_catalog:
+    enabled: true
+    api_url: "https://www.ebi.ac.uk/gwas/rest/api"
+    cache_dir: "./data/validation_cache/gwas"
+    cache_ttl: 604800
+    timeout: 30
+
+  # Tier 2: Comprehensive coverage
+  disgenet:
+    enabled: true
+    api_url: "https://www.disgenet.org/api"
+    api_key: null  # Set via environment variable DISGENET_API_KEY
+    data_dir: "./data/databases/disgenet"  # For bulk downloads
+    cache_dir: "./data/validation_cache/disgenet"
+    cache_ttl: 604800
+
+  monarch:
+    enabled: true
+    api_url: "https://api-v3.monarchinitiative.org/v3"
+    cache_dir: "./data/validation_cache/monarch"
+    cache_ttl: 604800
+    timeout: 30
+
+  string:
+    enabled: true
+    api_url: "https://string-db.org/api"
+    version: "12.0"
+    species: 9606  # Human
+    cache_dir: "./data/validation_cache/string"
+    network_file: "./data/databases/string/9606.protein.links.v12.0.txt.gz"
+
+  # Tier 3: Specialized databases
+  omim:
+    enabled: true
+    api_url: "https://api.omim.org/api"
+    api_key: null  # Set via environment variable OMIM_API_KEY
+    cache_dir: "./data/validation_cache/omim"
+    cache_ttl: 2592000  # 30 days
+
+  orphanet:
+    enabled: true
+    data_url: "http://www.orphadata.com/data/xml"
+    data_dir: "./data/databases/orphanet"
+    cache_dir: "./data/validation_cache/orphanet"
+    auto_download: true
+
+  clinvar:
+    enabled: true
+    api_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+    ftp_url: "https://ftp.ncbi.nlm.nih.gov/pub/clinvar"
+    data_dir: "./data/databases/clinvar"
+    cache_dir: "./data/validation_cache/clinvar"
+
+  gencc:
+    enabled: true
+    data_url: "https://search.thegencc.org/download"
+    data_file: "./data/databases/gencc/gencc-submissions.csv"
+    cache_dir: "./data/validation_cache/gencc"
+    auto_download: true
+
+# Gene ID mapping
+gene_mapping:
+  service: "mygene"  # mygene, biomart
+  api_url: "https://mygene.info/v3"
+  cache_dir: "./data/validation_cache/gene_mapping"
+
+# Enrichment analysis settings
+enrichment:
+  # Statistical testing
+  test_method: "fisher"  # fisher, hypergeometric
+  multiple_testing_correction: "fdr_bh"  # fdr_bh, bonferroni, none
+  significance_threshold: 0.05
+
+  # Feature gene sets
+  top_n_genes: 100  # Number of top genes per feature
+  min_gene_set_size: 5  # Minimum genes for enrichment test
+  max_gene_set_size: 500  # Maximum genes for enrichment test
+
+  # Background gene sets
+  background: "expressed"  # expressed, genome, custom
+  custom_background_file: null
+
+  # Enrichment types to perform
+  enrichment_types:
+    - "disease"
+    - "phenotype"
+    - "pathway"
+    - "go_biological_process"
+    - "go_molecular_function"
+    - "go_cellular_component"

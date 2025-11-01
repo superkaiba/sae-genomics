@@ -1,0 +1,6 @@
+[submodule "external/tahoe-x1"]
+	path = external/tahoe-x1
+	url = https://github.com/tahoebio/tahoe-x1.git
+[submodule "external/SAELens"]
+	path = external/SAELens
+	url = https://github.com/jbloomAus/SAELens.git

@@ -1,0 +1,77 @@
+# Default SAE training configuration
+
+training:
+  # Experiment tracking
+  experiment_name: "sae_training"
+  run_name: null  # Auto-generated if null
+  wandb_project: "sae-genomics"
+  wandb_enabled: true
+
+  # Model configuration
+  model_config: "configs/models/tx1_70m.yaml"
+
+  # SAE architecture
+  sae:
+    d_in: 512  # Should match model's d_model
+    d_sae: 16384  # Dictionary size (typically 16-64x d_in)
+    expansion_factor: 32  # d_sae = expansion_factor * d_in
+
+    # Activation function
+    activation: "topk"  # topk, relu
+    k: 64  # For topk activation
+
+    # Architecture details
+    normalize_decoder: true
+    apply_b_dec_to_input: true
+    decoder_orthogonal_init: true
+
+  # Training hyperparameters
+  optimizer:
+    name: "adam"
+    lr: 3.0e-4
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+
+  scheduler:
+    name: "cosine"
+    warmup_steps: 1000
+    total_steps: 100000
+
+  # Loss configuration
+  loss:
+    l1_coefficient: 1.0e-3
+    lp_norm: 1.0
+
+  # Training loop
+  batch_size: 32
+  total_training_steps: 100000
+  eval_every: 1000
+  save_every: 5000
+  log_every: 100
+
+  # Data loading
+  data:
+    dataset_path: "./data/activations"  # Path to pre-computed activations
+    num_workers: 4
+    prefetch_factor: 2
+
+  # Checkpointing
+  checkpoint:
+    save_dir: "./results/checkpoints"
+    keep_last_n: 5
+    save_optimizer: true
+
+  # Early stopping
+  early_stopping:
+    enabled: false
+    patience: 10
+    metric: "loss/total"
+
+  # Resource configuration
+  device: "auto"
+  dtype: "float32"
+  gradient_accumulation_steps: 1
+  mixed_precision: false
+
+  # Reproducibility
+  seed: 42
