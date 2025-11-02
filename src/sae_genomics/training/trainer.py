@@ -13,8 +13,7 @@ SAELENS_PATH = Path(__file__).parent.parent.parent.parent / "external" / "SAELen
 if str(SAELENS_PATH) not in sys.path:
     sys.path.insert(0, str(SAELENS_PATH))
 
-from sae_lens.training.sae import SAE
-from sae_lens.training.train_sae_on_activations import train_sae_on_activations
+from sae_lens import TopKTrainingSAE, TopKTrainingSAEConfig, TopKSAE, TopKSAEConfig
 
 from sae_genomics.models.tahoe_adapter import TahoeModelAdapter
 
@@ -57,15 +56,17 @@ class SAETrainer:
 
         # Initialize SAE
         self.sae = None
+        self.sae_inference = None  # For inference after training
 
     def initialize_sae(self):
         """Initialize the SAE model."""
-        self.sae = SAE(
+        config = TopKTrainingSAEConfig(
             d_in=self.d_in,
             d_sae=self.d_sae,
-            activation_fn=self.activation,
-            k=self.k if self.activation == "topk" else None,
+            k=self.k,
+            device=str(self.device),
         )
+        self.sae = TopKTrainingSAE(config)
         self.sae = self.sae.to(self.device)
 
     def train_on_activations(
@@ -112,7 +113,7 @@ class SAETrainer:
         # Training loop
         self.sae.train()
         total_steps = 0
-        metrics = {"losses": [], "l1_losses": [], "recon_losses": []}
+        metrics = {"losses": [], "mse_losses": [], "aux_losses": []}
 
         for epoch in range(n_epochs):
             pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{n_epochs}")
@@ -120,32 +121,44 @@ class SAETrainer:
             for batch_idx, (batch_acts,) in enumerate(pbar):
                 batch_acts = batch_acts.to(self.device)
 
-                # Forward pass
-                sae_out, feature_acts, loss_data = self.sae(
-                    batch_acts,
-                    return_loss=True,
-                    l1_coefficient=self.l1_coefficient,
+                # Create TrainStepInput (simplified - normally includes dead neuron tracking)
+                from sae_lens.saes.sae import TrainStepInput
+
+                step_input = TrainStepInput(
+                    sae_in=batch_acts,
+                    dead_neuron_mask=None,  # Simplified for now
                 )
 
-                loss = loss_data["loss"]
-                l1_loss = loss_data.get("l1_loss", 0)
-                recon_loss = loss_data.get("reconstruction_loss", 0)
+                # Forward pass
+                output = self.sae.training_forward_pass(step_input)
+
+                # Total loss is in output.losses dictionary
+                total_loss = output.losses.get("mse_loss", torch.tensor(0.0))
+                for loss_name, loss_value in output.losses.items():
+                    if loss_name != "mse_loss":
+                        total_loss = total_loss + loss_value
 
                 # Backward pass
                 optimizer.zero_grad()
-                loss.backward()
+                total_loss.backward()
                 optimizer.step()
 
                 # Logging
                 if total_steps % log_every == 0:
-                    metrics["losses"].append(loss.item())
-                    metrics["l1_losses"].append(l1_loss if isinstance(l1_loss, float) else l1_loss.item())
-                    metrics["recon_losses"].append(recon_loss if isinstance(recon_loss, float) else recon_loss.item())
+                    mse = output.losses.get("mse_loss", torch.tensor(0.0)).item()
+                    aux = sum(
+                        v.item()
+                        for k, v in output.losses.items()
+                        if k != "mse_loss" and isinstance(v, torch.Tensor)
+                    )
+
+                    metrics["losses"].append(total_loss.item())
+                    metrics["mse_losses"].append(mse)
+                    metrics["aux_losses"].append(aux)
 
                     pbar.set_postfix({
-                        "loss": f"{loss.item():.4f}",
-                        "l1": f"{metrics['l1_losses'][-1]:.4f}",
-                        "recon": f"{metrics['recon_losses'][-1]:.4f}",
+                        "loss": f"{total_loss.item():.4f}",
+                        "mse": f"{mse:.4f}",
                     })
 
                 # Checkpointing
@@ -160,115 +173,25 @@ class SAETrainer:
 
         return metrics
 
-    def train_on_dataloader(
-        self,
-        tahoe_adapter: TahoeModelAdapter,
-        dataloader: DataLoader,
-        n_steps: int = 10000,
-        batch_size: int = 256,
-        extract_every: int = 1000,
-        log_every: int = 100,
-        output_dir: Optional[Path] = None,
-    ) -> Dict:
-        """Train SAE by extracting activations on-the-fly.
-
-        Args:
-            tahoe_adapter: Tahoe model adapter
-            dataloader: DataLoader with single-cell data
-            n_steps: Total training steps
-            batch_size: SAE training batch size
-            extract_every: Extract new activations every N steps
-            log_every: Log frequency
-            output_dir: Directory to save checkpoints
-
-        Returns:
-            Training metrics dictionary
-        """
-        if self.sae is None:
-            self.initialize_sae()
-
-        # Extract initial activations
-        print("Extracting initial activations...")
-        activations, _ = tahoe_adapter.extract_activations(
-            dataloader,
-            max_batches=extract_every // dataloader.batch_size,
-        )
-
-        # Flatten
-        activations_flat = activations.reshape(-1, activations.shape[-1])
-
-        # Create dataset
-        dataset = TensorDataset(activations_flat)
-        sae_dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-        # Setup optimizer
-        optimizer = torch.optim.Adam(self.sae.parameters(), lr=self.lr)
-
-        # Training loop
-        self.sae.train()
-        total_steps = 0
-        metrics = {"losses": [], "l1_losses": [], "recon_losses": []}
-
-        pbar = tqdm(total=n_steps, desc="Training SAE")
-
-        while total_steps < n_steps:
-            # Re-extract activations periodically
-            if total_steps % extract_every == 0 and total_steps > 0:
-                print(f"\nRe-extracting activations at step {total_steps}...")
-                activations, _ = tahoe_adapter.extract_activations(
-                    dataloader,
-                    max_batches=extract_every // dataloader.batch_size,
-                )
-                activations_flat = activations.reshape(-1, activations.shape[-1])
-                dataset = TensorDataset(activations_flat)
-                sae_dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-            # Train on current activation buffer
-            for batch_acts, in sae_dataloader:
-                if total_steps >= n_steps:
-                    break
-
-                batch_acts = batch_acts.to(self.device)
-
-                # Forward pass
-                sae_out, feature_acts, loss_data = self.sae(
-                    batch_acts,
-                    return_loss=True,
-                    l1_coefficient=self.l1_coefficient,
-                )
-
-                loss = loss_data["loss"]
-
-                # Backward pass
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-                # Logging
-                if total_steps % log_every == 0:
-                    metrics["losses"].append(loss.item())
-                    pbar.set_postfix({"loss": f"{loss.item():.4f}"})
-
-                # Checkpointing
-                if output_dir is not None and total_steps % 1000 == 0 and total_steps > 0:
-                    self.save_checkpoint(output_dir / f"checkpoint_step_{total_steps}.pt")
-
-                total_steps += 1
-                pbar.update(1)
-
-        pbar.close()
-
-        # Save final checkpoint
-        if output_dir is not None:
-            self.save_checkpoint(output_dir / "final_checkpoint.pt")
-
-        return metrics
-
     def save_checkpoint(self, path: Path):
         """Save SAE checkpoint."""
         path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Convert to inference SAE
+        config = TopKSAEConfig(
+            d_in=self.d_in,
+            d_sae=self.d_sae,
+            k=self.k,
+            device=str(self.device),
+        )
+        sae_inference = TopKSAE(config)
+
+        # Copy weights
+        state_dict = self.sae.state_dict()
+        sae_inference.load_state_dict(state_dict, strict=False)
+
         torch.save({
-            "sae_state_dict": self.sae.state_dict(),
+            "sae_state_dict": sae_inference.state_dict(),
             "d_in": self.d_in,
             "d_sae": self.d_sae,
             "activation": self.activation,
@@ -289,8 +212,19 @@ class SAETrainer:
             device=device,
         )
 
-        trainer.initialize_sae()
-        trainer.sae.load_state_dict(checkpoint["sae_state_dict"])
+        # Load as inference SAE
+        config = TopKSAEConfig(
+            d_in=checkpoint["d_in"],
+            d_sae=checkpoint["d_sae"],
+            k=checkpoint.get("k", 64),
+            device=str(trainer.device),
+        )
+        trainer.sae_inference = TopKSAE(config)
+        trainer.sae_inference.load_state_dict(checkpoint["sae_state_dict"])
+        trainer.sae_inference = trainer.sae_inference.to(trainer.device)
+
+        # Use inference SAE as main SAE
+        trainer.sae = trainer.sae_inference
 
         print(f"Loaded checkpoint from {path}")
         return trainer

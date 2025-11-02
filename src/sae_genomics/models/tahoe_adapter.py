@@ -1,13 +1,18 @@
 """Adapter for loading and extracting activations from Tahoe X1 models."""
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
+
+if TYPE_CHECKING:
+    from tahoe_x1.model import ComposerTX
 
 # Add tahoe-x1 to path
 TAHOE_PATH = Path(__file__).parent.parent.parent.parent / "external" / "tahoe-x1"

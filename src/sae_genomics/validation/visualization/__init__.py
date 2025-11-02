@@ -1,6 +1,4 @@
 """Visualization tools for validation results."""
 
-from sae_genomics.validation.visualization.enrichment_plots import EnrichmentPlotter
-from sae_genomics.validation.visualization.feature_analysis import FeatureAnalyzer
-
+# Lazy imports - visualization modules will be implemented when needed
 __all__ = ["EnrichmentPlotter", "FeatureAnalyzer"]

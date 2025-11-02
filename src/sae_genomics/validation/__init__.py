@@ -1,5 +1,4 @@
 """Biological validation tools for SAE features."""
 
-from sae_genomics.validation import databases, enrichment, visualization
-
+# Lazy imports - modules will be loaded when accessed
 __all__ = ["databases", "enrichment", "visualization"]

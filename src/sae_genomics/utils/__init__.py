@@ -1,6 +1,4 @@
 """Shared utility functions."""
 
-from sae_genomics.utils.gene_mapping import GeneMapper
-from sae_genomics.utils.logging import setup_logging
-
+# Lazy imports - utility modules will be implemented when needed
 __all__ = ["GeneMapper", "setup_logging"]

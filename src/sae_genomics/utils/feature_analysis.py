@@ -85,7 +85,7 @@ class FeatureAnalyzer:
                 cell_acts_flat = cell_acts.reshape(-1, d_model)  # (seq_len, d_model)
 
                 # Run through SAE to get feature activations
-                _, feature_acts, _ = sae(cell_acts_flat, return_loss=False)  # (seq_len, n_features)
+                feature_acts = sae.encode(cell_acts_flat)  # (seq_len, d_sae)
 
                 # For each position in the sequence
                 for pos in range(seq_len):
@@ -191,7 +191,7 @@ class FeatureAnalyzer:
                 cell_acts_flat = cell_acts.reshape(-1, d_model)
 
                 # Get feature activations
-                _, feature_acts, _ = sae(cell_acts_flat, return_loss=False)
+                feature_acts = sae.encode(cell_acts_flat)
 
                 # Aggregate across sequence (max activation)
                 max_feature_acts = feature_acts.max(dim=0).values  # (n_features,)

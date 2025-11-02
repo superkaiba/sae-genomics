@@ -91,7 +91,6 @@ notebooks = [
     "jupyterlab>=4.0.0",
     "ipykernel>=6.27.0",
     "ipywidgets>=8.1.0",
-    "nb-black>=1.0.7",  # Black formatter for notebooks
 ]
 
 validation-extra = [

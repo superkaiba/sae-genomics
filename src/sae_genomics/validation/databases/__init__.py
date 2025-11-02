@@ -13,8 +13,5 @@ Includes clients for:
 - GenCC
 """
 
-from sae_genomics.validation.databases.open_targets import OpenTargetsClient
-from sae_genomics.validation.databases.hpo import HPOClient
-from sae_genomics.validation.databases.gwas import GWASCatalogClient
-
+# Lazy imports - clients will be implemented when needed
 __all__ = ["OpenTargetsClient", "HPOClient", "GWASCatalogClient"]
