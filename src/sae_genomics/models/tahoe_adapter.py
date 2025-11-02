@@ -14,8 +14,12 @@ TAHOE_PATH = Path(__file__).parent.parent.parent.parent / "external" / "tahoe-x1
 if str(TAHOE_PATH) not in sys.path:
     sys.path.insert(0, str(TAHOE_PATH))
 
-from tahoe_x1.model import ComposerTX
-from tahoe_x1.utils.util import loader_from_adata
+# Lazy imports - only load when needed
+def _import_tahoe():
+    """Lazy import of tahoe_x1 to avoid dependency issues."""
+    from tahoe_x1.model import ComposerTX
+    from tahoe_x1.utils.util import loader_from_adata
+    return ComposerTX, loader_from_adata
 
 
 class TahoeModelAdapter:
@@ -172,6 +176,7 @@ class TahoeModelAdapter:
         Returns:
             TahoeModelAdapter instance
         """
+        ComposerTX, _ = _import_tahoe()
         model, vocab, _, _ = ComposerTX.from_hf(repo_id, model_size)
         return cls(model, vocab, hook_points, device)
 
@@ -197,6 +202,8 @@ class TahoeModelAdapter:
         Returns:
             DataLoader
         """
+        _, loader_from_adata = _import_tahoe()
+
         # Match genes to vocabulary
         adata.var["id_in_vocab"] = [
             self.vocab[gene] if gene in self.vocab else -1
