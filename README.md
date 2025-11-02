@@ -86,78 +86,224 @@ Required API keys:
 
 ## Quick Start
 
-### 1. Configure Your Experiment
+The complete pipeline consists of 3 steps:
+1. Train SAE on Tahoe X1 activations
+2. Extract top activating genes/cells for each feature
+3. Create interactive visualization dashboard
 
-Choose a model configuration:
-```yaml
-# configs/models/tx1_70m.yaml - for prototyping
-# configs/models/tx1_3b.yaml - for production
-```
+### Option 1: Run Complete Pipeline (Recommended)
 
-Customize training:
-```yaml
-# configs/training/default.yaml
-```
+Run everything with one command:
 
-### 2. Train an SAE
-
-**Using CLI:**
 ```bash
-sae-train --config configs/training/default.yaml --output ./results/my_experiment
+python scripts/run_pipeline.py \
+    --data path/to/your/data.h5ad \
+    --model-size 70m \
+    --output results/my_experiment \
+    --steps 10000
 ```
 
-**Using script:**
+**For quick testing:**
 ```bash
-python scripts/train_sae.py --config configs/training/default.yaml
+python scripts/run_pipeline.py \
+    --data path/to/your/data.h5ad \
+    --model-size 70m \
+    --output results/test \
+    --steps 1000 \
+    --max-cells 1000
 ```
 
-**In Python:**
+This will:
+- ✓ Train SAE on Tahoe X1 activations
+- ✓ Extract top genes and cells for each feature
+- ✓ Create interactive HTML dashboard
+- ✓ Save all results to `results/my_experiment/`
+
+Open the dashboard: `open results/my_experiment/dashboard.html`
+
+### Option 2: Run Steps Individually
+
+**Step 1: Train SAE**
+```bash
+python scripts/01_train_sae.py \
+    --data path/to/data.h5ad \
+    --model-size 70m \
+    --output results/my_experiment \
+    --steps 10000
+```
+
+**Step 2: Extract Features**
+```bash
+python scripts/02_extract_features.py \
+    --sae results/my_experiment/sae_final.pt \
+    --data path/to/data.h5ad \
+    --output results/my_experiment
+```
+
+**Step 3: Create Dashboard**
+```bash
+python scripts/03_create_dashboard.py \
+    --results results/my_experiment
+```
+
+### What You Get
+
+After running the pipeline, you'll have:
+
+1. **Trained SAE** (`sae_final.pt`) - Sparse autoencoder with interpretable features
+2. **Feature Analysis** (`feature_gene_associations.json`) - Top genes for each feature
+3. **Cell Analysis** (`feature_cell_associations.json`) - Cell type enrichment per feature
+4. **Interactive Dashboard** (`dashboard.html`) - Visualize all features
+
+The dashboard shows:
+- All SAE features ranked by activation frequency
+- Top activating genes for each feature
+- Cell type enrichment (if cell type annotations provided)
+- Search functionality to filter by gene name
+
+### Example with Your Data
+
+Your data should be an AnnData file (`.h5ad`) with:
+- `adata.X` - Gene expression matrix (cells × genes)
+- `adata.var['ensembl_id']` - Ensembl gene IDs (or use `--gene-id-key` for different column)
+- `adata.obs['cell_type']` - (Optional) Cell type annotations
+
 ```python
-from sae_genomics.training import SAETrainer
-from sae_genomics.models import TahoeModelAdapter
+import scanpy as sc
 
-# Load model
-model = TahoeModelAdapter.from_config("configs/models/tx1_70m.yaml")
+# Load your data
+adata = sc.read_h5ad("your_data.h5ad")
+print(adata)  # Verify structure
 
-# Initialize trainer
-trainer = SAETrainer(config="configs/training/default.yaml")
-
-# Train
-trainer.train(model)
+# Run pipeline
+!python scripts/run_pipeline.py \
+    --data your_data.h5ad \
+    --output results/exp1 \
+    --steps 5000
 ```
 
-### 3. Validate Features
+## Pipeline Details
 
-**Using CLI:**
+### How It Works
+
+```
+Single-cell data (h5ad) → Tahoe X1 → Layer Activations → SAE → Interpretable Features
+                                            ↓
+                                     (What we analyze)
+```
+
+**Step 1: Train SAE**
+- Loads Tahoe X1 model from HuggingFace
+- Processes your single-cell data through the model
+- Extracts intermediate layer activations (not final embeddings)
+- Trains a sparse autoencoder on these activations
+- Saves trained SAE checkpoint
+
+**Step 2: Extract Features**
+- Loads trained SAE
+- Runs cells through Tahoe X1 + SAE pipeline
+- **Gene-level analysis**: Tracks which genes activate each SAE feature
+  - For each feature, identifies top genes based on activation × expression
+- **Cell-level analysis**: Identifies which cells strongly activate each feature
+  - Analyzes cell type enrichment if annotations provided
+- Saves feature-gene and feature-cell associations
+
+**Step 3: Create Dashboard**
+- Generates interactive HTML visualization
+- Shows top genes for each feature
+- Displays cell type enrichment
+- Includes search functionality
+
+### Understanding the Results
+
+**SAE Features = Biological Patterns**
+
+Each SAE feature captures a sparse pattern in the gene expression data. For example:
+
+- **Feature 42** might activate for genes: IL6, TNF, CXCL8, CCL2
+  - → Interpretation: "Inflammatory response feature"
+- **Feature 88** might activate for genes: TOP2A, MKI67, PCNA, CDK1
+  - → Interpretation: "Cell proliferation feature"
+- **Feature 156** might activate in: T cells, NK cells
+  - → Interpretation: "T cell identity feature"
+
+**Top Activating Genes**
+
+For each feature, the pipeline calculates:
+```
+score = feature_activation × gene_expression
+```
+
+This tells you: "which genes cause this feature to activate strongly"
+
+### Command-Line Options
+
+**run_pipeline.py options:**
 ```bash
-sae-validate results/checkpoints/sae_final.pt --config configs/validation/databases.yaml
+--data PATH              # Path to h5ad file (required)
+--output PATH            # Output directory (required)
+--model-size {70m,1.3b,3b}  # Tahoe X1 size (default: 70m)
+--steps INT              # Training steps (default: 10000)
+--max-cells INT          # Limit cells for testing
+--top-k-genes INT        # Top genes per feature (default: 100)
+--top-k-cells INT        # Top cells per feature (default: 100)
+--top-n-features INT     # Features in dashboard (default: 100)
+--device {auto,cuda,cpu} # Compute device
+--skip-training          # Skip training (use existing checkpoint)
+--skip-extraction        # Skip feature extraction
+--skip-dashboard         # Skip dashboard creation
 ```
 
-**Using script:**
-```bash
-python scripts/validate_features.py results/checkpoints/sae_final.pt
-```
-
-**In Python:**
-```python
-from sae_genomics.validation import FeatureValidator
-
-validator = FeatureValidator(config="configs/validation/databases.yaml")
-results = validator.validate("results/checkpoints/sae_final.pt")
-validator.save_report(results, "results/validation/report.html")
-```
-
-### 4. Explore in Notebooks
+**Example commands:**
 
 ```bash
-jupyter lab notebooks/exploratory/
+# Quick test run (1000 cells, 1000 steps)
+python scripts/run_pipeline.py \
+    --data data.h5ad \
+    --output results/test \
+    --steps 1000 \
+    --max-cells 1000
+
+# Full run on 3B model
+python scripts/run_pipeline.py \
+    --data data.h5ad \
+    --model-size 3b \
+    --output results/large_model \
+    --steps 50000
+
+# Resume from existing checkpoint
+python scripts/run_pipeline.py \
+    --data data.h5ad \
+    --output results/exp1 \
+    --skip-training \
+    --skip-extraction
+
+# Extract more genes per feature
+python scripts/02_extract_features.py \
+    --sae results/exp1/sae_final.pt \
+    --data data.h5ad \
+    --top-k-genes 200
 ```
 
-Example notebooks:
-- `01_data_exploration.ipynb` - Explore tahoe x1 activations
-- `02_sae_training.ipynb` - Interactive SAE training
-- `03_feature_analysis.ipynb` - Analyze learned features
-- `04_validation_results.ipynb` - Visualize validation results
+### Performance Tips
+
+**For prototyping (fast iteration):**
+- Use 70M model
+- Limit to 1000-5000 cells (`--max-cells`)
+- Train for 1000-5000 steps
+- Takes ~10-30 minutes on GPU
+
+**For production (best features):**
+- Use 3B model
+- Use full dataset
+- Train for 20000-50000 steps
+- Takes several hours on GPU
+
+**Memory management:**
+- 70M model: ~4GB GPU memory
+- 1.3B model: ~8GB GPU memory
+- 3B model: ~16GB GPU memory
+- SAE training adds ~2-4GB
 
 ## Repository Structure
 
