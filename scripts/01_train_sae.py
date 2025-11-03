@@ -117,8 +117,8 @@ def main():
         # Use default config for model size
         default_configs = {
             "70m": "configs/models/tx1_70m.yaml",
-            "1.3b": "configs/models/tx1_3b.yaml",
-            "3b": "configs/models/tx1_3b.yaml",
+            "1.3b": "configs/models/tx1_3b.yaml",  # Both use same config for now
+            "3b": "configs/models/tx1_3b.yaml",    # TODO: Create separate configs if needed
         }
         config_path = Path(default_configs[args.model_size])
         if config_path.exists():
@@ -161,7 +161,7 @@ def main():
     # Subset if requested
     if train_config.max_cells and adata.n_obs > train_config.max_cells:
         console.print(f"  Subsampling to {train_config.max_cells} cells")
-        adata = adata[: train_config.max_cells, :]
+        adata = adata[:train_config.max_cells, :]
 
     # Step 3: Create DataLoader
     console.print("\n[bold]Step 3: Creating DataLoader[/bold]")
@@ -234,17 +234,19 @@ def main():
     console.print(f"  - Activation: {train_config.activation} (k={train_config.k})")
 
     # Calculate number of epochs
+    sae_batch_size = 256  # SAE training batch size (independent of dataloader batch size)
     n_samples = activations.shape[0] * activations.shape[1]  # cells * seq_len
-    steps_per_epoch = n_samples // (train_config.batch_size * 256)  # SAE batch size
+    steps_per_epoch = n_samples // sae_batch_size
     n_epochs = max(1, train_config.total_training_steps // steps_per_epoch)
 
     console.print(f"  - Training for {n_epochs} epochs ({train_config.total_training_steps} steps)")
+    console.print(f"  - Steps per epoch: {steps_per_epoch} (batch_size={sae_batch_size})")
 
     # Train
     metrics = trainer.train_on_activations(
         activations=activations,
         n_epochs=n_epochs,
-        batch_size=256,  # SAE training batch size
+        batch_size=sae_batch_size,  # SAE training batch size
         log_every=train_config.log_every,
         save_every=train_config.save_every,
         output_dir=args.output / "checkpoints",

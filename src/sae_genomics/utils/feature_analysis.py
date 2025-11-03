@@ -32,7 +32,7 @@ class FeatureAnalyzer:
         gene_ids: torch.Tensor,
         expressions: torch.Tensor = None,
         top_k: int = 100,
-        device: str = "cuda" if torch.cuda.is_available() else "cpu",
+        device: str = None,
     ) -> Dict[int, Dict]:
         """Extract gene associations for each SAE feature.
 
@@ -56,30 +56,35 @@ class FeatureAnalyzer:
                 'n_activations': int,
             }
         """
+        # Detect device at runtime if not specified
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
         sae = sae.to(device)
         sae.eval()
 
         n_cells, seq_len, d_model = activations.shape
-        n_features = sae.d_sae
+        n_features = sae.cfg.d_sae
 
         # Storage for gene-feature associations
         # feature_gene_scores[feature_id][gene_id] = cumulative score
         feature_gene_scores = defaultdict(lambda: defaultdict(float))
         feature_activation_counts = defaultdict(int)
 
-        print(f"Analyzing {n_cells} cells across {n_features} features...")
+        import sys
+        print(f"Analyzing {n_cells} cells across {n_features} features...", file=sys.stderr)
 
         with torch.no_grad():
             for cell_idx in tqdm(range(n_cells), desc="Processing cells"):
                 # Get activations for this cell
-                cell_acts = activations[cell_idx: cell_idx + 1].to(device)  # (1, seq_len, d_model)
+                cell_acts = activations[cell_idx:cell_idx + 1].to(device)  # (1, seq_len, d_model)
                 cell_genes = gene_ids[cell_idx]  # (seq_len,)
 
                 # Get expression values if provided
                 if expressions is not None:
                     cell_expr = expressions[cell_idx]  # (seq_len,)
                 else:
-                    cell_expr = torch.ones_like(cell_genes, dtype=torch.float32)
+                    cell_expr = None
 
                 # Flatten for SAE
                 cell_acts_flat = cell_acts.reshape(-1, d_model)  # (seq_len, d_model)
@@ -93,7 +98,7 @@ class FeatureAnalyzer:
                     if gene_id < 0:  # Skip padding
                         continue
 
-                    gene_expr = cell_expr[pos].item() if expressions is not None else 1.0
+                    gene_expr = cell_expr[pos].item() if cell_expr is not None else 1.0
                     pos_feature_acts = feature_acts[pos]  # (n_features,)
 
                     # Find active features at this position
@@ -156,7 +161,7 @@ class FeatureAnalyzer:
         activations: torch.Tensor,
         cell_metadata: pd.DataFrame = None,
         top_k_cells: int = 100,
-        device: str = "cuda" if torch.cuda.is_available() else "cpu",
+        device: str = None,
     ) -> Dict[int, Dict]:
         """Extract top activating cells for each feature.
 
@@ -173,21 +178,26 @@ class FeatureAnalyzer:
                 'cell_types': Counter of cell types (if metadata provided),
             }
         """
+        # Detect device at runtime if not specified
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
         sae = sae.to(device)
         sae.eval()
 
         n_cells, seq_len, d_model = activations.shape
-        n_features = sae.d_sae
+        n_features = sae.cfg.d_sae
 
         # Storage for cell-feature associations
         # feature_cell_scores[feature_id][cell_idx] = max activation
         feature_cell_scores = defaultdict(lambda: defaultdict(float))
 
-        print(f"Analyzing top activating cells across {n_features} features...")
+        import sys
+        print(f"Analyzing top activating cells across {n_features} features...", file=sys.stderr)
 
         with torch.no_grad():
             for cell_idx in tqdm(range(n_cells), desc="Processing cells"):
-                cell_acts = activations[cell_idx: cell_idx + 1].to(device)
+                cell_acts = activations[cell_idx:cell_idx + 1].to(device)
                 cell_acts_flat = cell_acts.reshape(-1, d_model)
 
                 # Get feature activations
@@ -254,7 +264,8 @@ class FeatureAnalyzer:
         with open(output_path, "w") as f:
             json.dump(results_serializable, f, indent=2)
 
-        print(f"Saved results to {output_path}")
+        import sys
+        print(f"Saved results to {output_path}", file=sys.stderr)
 
     @staticmethod
     def load_results(input_path: str) -> Dict:

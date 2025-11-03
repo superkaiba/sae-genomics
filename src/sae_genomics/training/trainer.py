@@ -17,6 +17,9 @@ from sae_lens import TopKTrainingSAE, TopKTrainingSAEConfig, TopKSAE, TopKSAECon
 
 from sae_genomics.models.tahoe_adapter import TahoeModelAdapter
 
+# Training constants
+GRADIENT_CLIP_VALUE = 1.0  # Max gradient norm for clipping
+
 
 class SAETrainer:
     """Trainer for sparse autoencoders on Tahoe X1 activations."""
@@ -115,18 +118,28 @@ class SAETrainer:
         total_steps = 0
         metrics = {"losses": [], "mse_losses": [], "aux_losses": []}
 
+        # Calculate total training steps for SAELens
+        total_training_steps = len(dataloader) * n_epochs
+
+        # Coefficients for training (L1 coefficient, etc.)
+        coefficients = {
+            "l1": self.l1_coefficient,
+        }
+
         for epoch in range(n_epochs):
             pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{n_epochs}")
 
             for batch_idx, (batch_acts,) in enumerate(pbar):
                 batch_acts = batch_acts.to(self.device)
 
-                # Create TrainStepInput (simplified - normally includes dead neuron tracking)
+                # Create TrainStepInput with required parameters
                 from sae_lens.saes.sae import TrainStepInput
 
                 step_input = TrainStepInput(
                     sae_in=batch_acts,
+                    coefficients=coefficients,
                     dead_neuron_mask=None,  # Simplified for now
+                    n_training_steps=total_training_steps,
                 )
 
                 # Forward pass
@@ -135,12 +148,16 @@ class SAETrainer:
                 # Total loss is in output.losses dictionary
                 total_loss = output.losses.get("mse_loss", torch.tensor(0.0))
                 for loss_name, loss_value in output.losses.items():
-                    if loss_name != "mse_loss":
+                    if loss_name != "mse_loss" and isinstance(loss_value, torch.Tensor):
                         total_loss = total_loss + loss_value
 
                 # Backward pass
                 optimizer.zero_grad()
                 total_loss.backward()
+
+                # Gradient clipping for training stability
+                torch.nn.utils.clip_grad_norm_(self.sae.parameters(), GRADIENT_CLIP_VALUE)
+
                 optimizer.step()
 
                 # Logging
@@ -186,9 +203,15 @@ class SAETrainer:
         )
         sae_inference = TopKSAE(config)
 
-        # Copy weights
+        # Copy weights (use strict=True to catch mismatches)
         state_dict = self.sae.state_dict()
-        sae_inference.load_state_dict(state_dict, strict=False)
+        try:
+            sae_inference.load_state_dict(state_dict, strict=True)
+        except RuntimeError as e:
+            # If strict loading fails, fall back to non-strict with a warning
+            print(f"Warning: Strict state dict loading failed: {e}")
+            print("Falling back to non-strict loading. Some weights may not match.")
+            sae_inference.load_state_dict(state_dict, strict=False)
 
         torch.save({
             "sae_state_dict": sae_inference.state_dict(),
@@ -197,7 +220,8 @@ class SAETrainer:
             "activation": self.activation,
             "k": self.k,
         }, path)
-        print(f"Saved checkpoint to {path}")
+        import sys
+        print(f"Saved checkpoint to {path}", file=sys.stderr)
 
     @classmethod
     def load_checkpoint(cls, path: Path, device: str = "auto") -> "SAETrainer":
@@ -226,5 +250,6 @@ class SAETrainer:
         # Use inference SAE as main SAE
         trainer.sae = trainer.sae_inference
 
-        print(f"Loaded checkpoint from {path}")
+        import sys
+        print(f"Loaded checkpoint from {path}", file=sys.stderr)
         return trainer

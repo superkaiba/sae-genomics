@@ -16,8 +16,9 @@ sc.pp.filter_genes(adata, min_cells=3)
 
 print(f"After filtering: {adata.n_obs} cells × {adata.n_vars} genes")
 
-# Add ensembl_id (use gene symbols for this dataset)
-adata.var['ensembl_id'] = adata.var_names
+# Add ensembl_id - use the actual Ensembl IDs from gene_ids column
+# Tahoe model uses Ensembl gene IDs (ENSG format)
+adata.var['ensembl_id'] = adata.var['gene_ids']
 
 # Add some fake cell type annotations for testing
 # Just use simple binning for quick testing

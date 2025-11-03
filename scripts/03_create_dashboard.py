@@ -30,6 +30,7 @@ def create_html_dashboard(
     summary: Dict,
     output_path: Path,
     top_n_features: int = 50,
+    validation_results: Dict = None,
 ):
     """Create an HTML dashboard for SAE features.
 
@@ -39,6 +40,7 @@ def create_html_dashboard(
         summary: Extraction summary
         output_path: Path to save HTML file
         top_n_features: Number of top features to display
+        validation_results: Optional biological validation results from step 04
     """
     # Sort features by number of activations
     sorted_features = sorted(
@@ -189,6 +191,50 @@ def create_html_dashboard(
             margin-right: 8px;
             margin-bottom: 8px;
         }}
+        .validation {{
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #2a2a3e;
+        }}
+        .validation h4 {{
+            color: #f093fb;
+            margin-bottom: 10px;
+            font-size: 0.9em;
+        }}
+        .validation-empty {{
+            color: #666;
+            font-size: 0.85em;
+            font-style: italic;
+        }}
+        .enrichment-item {{
+            padding: 8px 12px;
+            margin-bottom: 6px;
+            background: #1a1a2e;
+            border-radius: 6px;
+            border-left: 3px solid #f093fb;
+        }}
+        .enrichment-term {{
+            color: #e0e0e0;
+            font-size: 0.9em;
+            display: block;
+            margin-bottom: 4px;
+        }}
+        .enrichment-meta {{
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8em;
+            color: #888;
+        }}
+        .enrichment-db {{
+            background: #16213e;
+            padding: 2px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            font-size: 0.75em;
+        }}
+        .enrichment-pvalue {{
+            font-family: 'Courier New', monospace;
+        }}
         .search-box {{
             position: sticky;
             top: 20px;
@@ -261,8 +307,9 @@ def create_html_dashboard(
         top_genes = feat_data.get("top_genes", [])[:10]
         n_activations = feat_data.get("n_activations", 0)
 
-        # Get cell type info if available
-        cell_data = cell_results.get(str(feat_id), {})
+        # Get cell type info if available (ensure consistent string key type)
+        feat_id_str = str(feat_id)
+        cell_data = cell_results.get(feat_id_str, {})
         cell_types = cell_data.get("cell_types", {})
 
         html += f"""
@@ -304,6 +351,51 @@ def create_html_dashboard(
                     <span class="cell-type-badge">{cell_type} ({count})</span>
 """
             html += """
+                </div>
+"""
+
+        # Add validation enrichment if available (use same string key)
+        if validation_results and feat_id_str in validation_results:
+            val_data = validation_results[feat_id_str]
+            enrichments = val_data.get('enrichments', {})
+
+            # Collect all enrichments across databases
+            all_enrichments = []
+            for db_name, db_enrichments in enrichments.items():
+                for enr in db_enrichments[:3]:  # Top 3 per database
+                    all_enrichments.append((db_name, enr))
+
+            if all_enrichments:
+                # Sort by p-value and take top 5
+                all_enrichments.sort(key=lambda x: x[1]['p_value_adjusted'])
+                top_enrichments = all_enrichments[:5]
+
+                html += """
+                <div class="validation">
+                    <h4>🔬 Biological Validation</h4>
+"""
+                for db_name, enr in top_enrichments:
+                    term_name = enr['term_name']
+                    p_value = enr['p_value_adjusted']
+                    overlap = enr['genes_overlap']
+
+                    html += f"""
+                    <div class="enrichment-item">
+                        <span class="enrichment-term">{term_name}</span>
+                        <div class="enrichment-meta">
+                            <span class="enrichment-db">{db_name}</span>
+                            <span class="enrichment-pvalue">p={p_value:.2e} ({overlap} genes)</span>
+                        </div>
+                    </div>
+"""
+                html += """
+                </div>
+"""
+            else:
+                html += """
+                <div class="validation">
+                    <h4>🔬 Biological Validation</h4>
+                    <div class="validation-empty">No significant enrichments found</div>
                 </div>
 """
 
@@ -443,6 +535,19 @@ def main():
     else:
         console.print("[yellow]  Summary not found, using defaults[/yellow]")
 
+    # Load validation results if available
+    validation_path = args.results / "validation" / "feature_validations.json"
+    validation_results = None
+
+    if validation_path.exists():
+        with open(validation_path) as f:
+            validation_results = json.load(f)
+        n_validated = sum(1 for v in validation_results.values() if v.get('n_enrichments_total', 0) > 0)
+        console.print(f"✓ Loaded validation results ({n_validated}/{len(validation_results)} features with enrichments)")
+    else:
+        console.print("[yellow]  Validation results not found, skipping biological validation[/yellow]")
+        console.print("[dim]  Run 04_validate_features.py to add validation data[/dim]")
+
     # Step 2: Create dashboard
     console.print("\n[bold]Step 2: Creating HTML dashboard[/bold]")
 
@@ -452,6 +557,7 @@ def main():
         summary=summary,
         output_path=args.output,
         top_n_features=args.top_n,
+        validation_results=validation_results,
     )
 
     # Final summary
@@ -463,6 +569,11 @@ def main():
     console.print(f"  - Search functionality to filter features by gene")
     console.print(f"  - Top {args.top_n} most active features displayed")
     console.print(f"  - Gene and cell type associations shown")
+
+    if validation_results:
+        console.print(f"  - Biological validation enrichments displayed")
+    else:
+        console.print(f"\n[dim]Tip: Run 04_validate_features.py to add biological validation[/dim]")
 
 
 if __name__ == "__main__":

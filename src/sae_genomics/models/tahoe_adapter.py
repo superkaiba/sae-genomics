@@ -55,6 +55,11 @@ class TahoeModelAdapter:
             self.device = torch.device(device)
 
         self.model = self.model.to(self.device)
+
+        # Convert to bfloat16 for flash attention compatibility (flash attention requires fp16/bf16)
+        if self.device.type == 'cuda':
+            self.model = self.model.to(torch.bfloat16)
+
         self.model.eval()
 
         # Storage for activations
@@ -65,12 +70,14 @@ class TahoeModelAdapter:
         """Get default hook points based on model size."""
         n_layers = self.model.model.n_layers
 
+        # Hook into layer outputs (entire block)
+        # Tahoe uses: model.transformer_encoder.layers[i]
         if n_layers <= 12:  # 70M model
-            return [f"model.blocks.{i}" for i in [0, 3, 6, 9, 11]]
+            return [f"model.transformer_encoder.layers.{i}" for i in [0, 3, 6, 9, 11]]
         elif n_layers <= 24:  # 1.3B model
-            return [f"model.blocks.{i}" for i in [0, 6, 12, 18, 23]]
+            return [f"model.transformer_encoder.layers.{i}" for i in [0, 6, 12, 18, 23]]
         else:  # 3B model
-            return [f"model.blocks.{i}" for i in [0, 8, 16, 24, 31]]
+            return [f"model.transformer_encoder.layers.{i}" for i in [0, 8, 16, 24, 31]]
 
     def _get_activation_hook(self, name: str):
         """Create a hook function to capture activations."""
@@ -87,10 +94,21 @@ class TahoeModelAdapter:
         self.remove_hooks()  # Clear any existing hooks
 
         for hook_point in self.hook_points:
-            # Navigate to the module
+            # Navigate to the module with proper error handling
             module = self.model
-            for part in hook_point.split('.'):
-                module = getattr(module, part)
+            try:
+                for part in hook_point.split('.'):
+                    module = getattr(module, part)
+            except AttributeError as e:
+                # Provide helpful error message with correct structure
+                n_layers = self.model.model.n_layers
+                available_layers = [f"model.transformer_encoder.layers.{i}" for i in range(n_layers)]
+                raise ValueError(
+                    f"Invalid hook point '{hook_point}': {e}. "
+                    f"Check that this layer exists in the model. "
+                    f"Tahoe model structure: model.transformer_encoder.layers[0-{n_layers-1}]. "
+                    f"Example hook points: {available_layers[:3]}"
+                ) from e
 
             # Register hook
             hook = module.register_forward_hook(self._get_activation_hook(hook_point))
@@ -133,23 +151,44 @@ class TahoeModelAdapter:
             if max_batches is not None and batch_idx >= max_batches:
                 break
 
-            # Move batch to device
+            # Move batch to device and extract gene IDs
             if isinstance(batch, dict):
                 batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v
                         for k, v in batch.items()}
-                input_ids = batch.get('input_ids', batch.get('gene_ids'))
+                # Convert to bfloat16 for flash attention compatibility
+                if self.device.type == 'cuda':
+                    batch = {k: v.to(torch.bfloat16) if isinstance(v, torch.Tensor) and v.dtype == torch.float32 else v
+                            for k, v in batch.items()}
+                # Tahoe dataloader returns: gene, expr, expr_target, expr_raw, gen_mask
+                gene_ids_batch = batch.get('gene', batch.get('input_ids', batch.get('gene_ids')))
+                if gene_ids_batch is None:
+                    raise ValueError(
+                        "Batch dict must contain 'gene', 'input_ids', or 'gene_ids' key. "
+                        f"Available keys: {list(batch.keys())}"
+                    )
             else:
-                batch = batch.to(self.device)
-                input_ids = batch
+                if not isinstance(batch, torch.Tensor):
+                    raise TypeError(
+                        f"Expected batch to be dict or Tensor, got {type(batch).__name__}"
+                    )
+                batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                        for k, v in batch.items()}
+                if self.device.type == 'cuda':
+                    batch = {k: v.to(torch.bfloat16) if isinstance(v, torch.Tensor) and v.dtype == torch.float32 else v
+                            for k, v in batch.items()}
+                gene_ids_batch = batch
 
-            # Forward pass
+            # Forward pass - Tahoe model expects a dict with gene, expr, etc.
             _ = self.model(batch)
 
             # Extract activation for specified layer
             if layer in self.activations:
                 act = self.activations[layer].cpu()
+                # Convert back to float32 for compatibility with SAE training
+                if act.dtype == torch.bfloat16:
+                    act = act.to(torch.float32)
                 all_activations.append(act)
-                all_gene_ids.append(input_ids.cpu())
+                all_gene_ids.append(gene_ids_batch.cpu())
 
             # Clear activations for next batch
             self.activations = {}
@@ -216,7 +255,17 @@ class TahoeModelAdapter:
         ]
 
         gene_ids_in_vocab = np.array(adata.var["id_in_vocab"])
-        print(f"Matched {np.sum(gene_ids_in_vocab >= 0)}/{len(gene_ids_in_vocab)} genes to vocabulary")
+        n_matched = np.sum(gene_ids_in_vocab >= 0)
+        import sys
+        print(f"Matched {n_matched}/{len(gene_ids_in_vocab)} genes to vocabulary", file=sys.stderr)
+
+        # Validate that at least some genes matched
+        if n_matched == 0:
+            raise ValueError(
+                f"No genes in the dataset matched the model vocabulary. "
+                f"Check that gene_id_key='{gene_id_key}' contains the correct gene identifiers. "
+                f"Example genes in data: {list(adata.var[gene_id_key].head())}"
+            )
 
         # Filter to genes in vocabulary
         adata = adata[:, adata.var["id_in_vocab"] >= 0]
@@ -224,10 +273,26 @@ class TahoeModelAdapter:
         gene_ids = np.array([self.vocab[gene] for gene in genes], dtype=int)
 
         # Get collator config from model
-        collator_cfg = {
+        # These values are needed by tahoe's loader_from_adata
+        # Must be an OmegaConf DictConfig (not regular dict) for attribute access
+        from omegaconf import DictConfig
+
+        collator_cfg = DictConfig({
+            # Required fields (accessed with attribute access)
             "pad_token_id": getattr(self.model.model, "pad_token_id", 0),
-            "mask_token_id": getattr(self.model.model, "mask_token_id", 1),
-        }
+            "pad_value": getattr(self.model.model, "pad_value", -2),  # Expression value for PAD tokens
+            "mask_value": -1,  # Expression value for MASK tokens (not used in inference)
+            "mlm_probability": 0.0,  # No masking for inference
+            "sampling": True,  # Sample genes when max_length < n_genes
+            # Optional fields with sensible defaults for inference
+            "do_padding": True,
+            "do_binning": True,
+            "log_transform": False,
+            "num_bins": 51,
+            "right_binning": False,
+            "keep_first_n_tokens": 1,
+            "use_chem_token": False,
+        })
 
         # Create DataLoader
         loader = loader_from_adata(
