@@ -14,10 +14,7 @@ from .parsers import (
     STRINGParser,
     OrphanetParser,
     ClinVarParser,
-    DisGeNETParser,
-    OMIMParser,
     MonarchParser,
-    OpenTargetsParser,
 )
 from .enrichment import EnrichmentAnalyzer, EnrichmentResult
 
@@ -61,6 +58,7 @@ class LocalValidationClient:
             'gwas': {'terms_to_genes': {}, 'term_names': {}},
             'orphanet': {'terms_to_genes': {}, 'term_names': {}},
             'clinvar': {'terms_to_genes': {}, 'term_names': {}},
+            'monarch': {'terms_to_genes': {}, 'term_names': {}},
             'all_genes': set(),
         }
 
@@ -111,6 +109,11 @@ class LocalValidationClient:
         clinvar_dir = self.databases_dir / 'clinvar'
         if clinvar_dir.exists():
             self._load_clinvar(clinvar_dir)
+
+        # Load Monarch
+        monarch_dir = self.databases_dir / 'monarch'
+        if monarch_dir.exists():
+            self._load_monarch(monarch_dir)
 
         # Summary
         n_genes = len(self.data['all_genes'])
@@ -289,6 +292,22 @@ class LocalValidationClient:
         except Exception as e:
             self._print(f"[red]✗ Failed to load ClinVar: {e}[/red]")
 
+    def _load_monarch(self, monarch_dir: Path):
+        """Load Monarch database."""
+        try:
+            self._print("[blue]Loading Monarch...[/blue]")
+            parser = MonarchParser(monarch_dir, format='duckdb')
+            self.parsers['monarch'] = parser
+
+            # Monarch is large (1M+ nodes, 14M+ edges)
+            # We'll load it on-demand during validation using build_gene_disease_index()
+            # This method is called during validate_gene_set to query diseases for specific genes
+
+            self._print("[green]✓ Monarch database ready (on-demand queries)[/green]")
+
+        except Exception as e:
+            self._print(f"[red]✗ Failed to load Monarch: {e}[/red]")
+
     def validate_gene_set(
         self,
         gene_set: Set[str],
@@ -308,10 +327,19 @@ class LocalValidationClient:
             Dict mapping database names to lists of significant enrichment results
         """
         if databases is None:
-            databases = ['gencc', 'hpo_phenotypes', 'hpo_diseases', 'gwas', 'orphanet', 'clinvar']
+            databases = ['gencc', 'hpo_phenotypes', 'hpo_diseases', 'gwas', 'orphanet', 'clinvar', 'monarch']
 
         # Filter to available databases
-        databases = [db for db in databases if db in self.data and self.data[db]['terms_to_genes']]
+        available_dbs = []
+        for db in databases:
+            if db == 'monarch':
+                # Monarch is query-based, check if parser exists
+                if 'monarch' in self.parsers:
+                    available_dbs.append(db)
+            elif db in self.data and self.data[db]['terms_to_genes']:
+                available_dbs.append(db)
+
+        databases = available_dbs
 
         # Initialize enrichment analyzer
         analyzer = EnrichmentAnalyzer(
@@ -324,6 +352,31 @@ class LocalValidationClient:
         results = {}
 
         for db_name in databases:
+            # Handle Monarch specially (query-based)
+            if db_name == 'monarch':
+                if 'monarch' in self.parsers:
+                    # Query diseases for all genes in set
+                    associations = list(self.parsers['monarch'].query_genes_batch(gene_set))
+
+                    # Build disease→genes index from associations
+                    terms_to_genes = defaultdict(set)
+                    term_names = {}
+
+                    for assoc in associations:
+                        terms_to_genes[assoc.disease_id].add(assoc.gene_symbol)
+                        term_names[assoc.disease_id] = assoc.disease_name
+
+                    if terms_to_genes:
+                        enrichment_results = analyzer.test_multiple_terms(
+                            query_genes=gene_set,
+                            term_to_genes=dict(terms_to_genes),
+                            term_to_name=term_names,
+                            source='monarch',
+                        )
+                        significant = analyzer.filter_significant(enrichment_results)
+                        results['monarch'] = significant
+                continue
+
             db_data = self.data[db_name]
 
             if not db_data['terms_to_genes']:

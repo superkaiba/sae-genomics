@@ -70,12 +70,13 @@ class MonarchParser:
         if self.format != 'duckdb':
             raise NotImplementedError("TSV format not yet supported")
 
-        # Query for gene node
+        # Query for gene node (prioritize HGNC/human genes)
         gene_query = """
         SELECT id, name, category
         FROM nodes
-        WHERE name = ? OR id LIKE '%' || ? || '%'
+        WHERE (name = ? OR id LIKE '%' || ? || '%')
         AND category LIKE '%Gene%'
+        ORDER BY CASE WHEN id LIKE 'HGNC:%' THEN 0 ELSE 1 END
         LIMIT 1
         """
 
@@ -136,12 +137,13 @@ class MonarchParser:
         if self.format != 'duckdb':
             raise NotImplementedError("TSV format not yet supported")
 
-        # Query for gene node
+        # Query for gene node (prioritize HGNC/human genes)
         gene_query = """
         SELECT id, name
         FROM nodes
-        WHERE name = ? OR id LIKE '%' || ? || '%'
+        WHERE (name = ? OR id LIKE '%' || ? || '%')
         AND category LIKE '%Gene%'
+        ORDER BY CASE WHEN id LIKE 'HGNC:%' THEN 0 ELSE 1 END
         LIMIT 1
         """
 
