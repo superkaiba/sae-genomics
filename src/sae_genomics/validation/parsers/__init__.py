@@ -10,6 +10,10 @@ __all__ = [
     "STRINGParser",
     "OrphanetParser",
     "ClinVarParser",
+    "DisGeNETParser",
+    "OMIMParser",
+    "MonarchParser",
+    "OpenTargetsParser",
 ]
 
 
@@ -35,6 +39,10 @@ def __getattr__(name: str):
         "STRINGParser": "string",
         "OrphanetParser": "orphanet",
         "ClinVarParser": "clinvar",
+        "DisGeNETParser": "disgenet",
+        "OMIMParser": "omim",
+        "MonarchParser": "monarch",
+        "OpenTargetsParser": "open_targets",
     }
 
     if name in parsers_map:
