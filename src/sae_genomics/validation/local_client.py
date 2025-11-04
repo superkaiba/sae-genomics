@@ -15,6 +15,7 @@ from .parsers import (
     OrphanetParser,
     ClinVarParser,
     MonarchParser,
+    OpenTargetsParser,
 )
 from .enrichment import EnrichmentAnalyzer, EnrichmentResult
 
@@ -59,6 +60,7 @@ class LocalValidationClient:
             'orphanet': {'terms_to_genes': {}, 'term_names': {}},
             'clinvar': {'terms_to_genes': {}, 'term_names': {}},
             'monarch': {'terms_to_genes': {}, 'term_names': {}},
+            'open_targets': {'terms_to_genes': {}, 'term_names': {}},
             'all_genes': set(),
         }
 
@@ -114,6 +116,11 @@ class LocalValidationClient:
         monarch_dir = self.databases_dir / 'monarch'
         if monarch_dir.exists():
             self._load_monarch(monarch_dir)
+
+        # Load Open Targets
+        open_targets_dir = self.databases_dir / 'open_targets'
+        if open_targets_dir.exists():
+            self._load_open_targets(open_targets_dir)
 
         # Summary
         n_genes = len(self.data['all_genes'])
@@ -308,6 +315,21 @@ class LocalValidationClient:
         except Exception as e:
             self._print(f"[red]✗ Failed to load Monarch: {e}[/red]")
 
+    def _load_open_targets(self, open_targets_dir: Path):
+        """Load Open Targets database."""
+        try:
+            self._print("[blue]Loading Open Targets...[/blue]")
+            parser = OpenTargetsParser(open_targets_dir, score_threshold=0.2)
+            self.parsers['open_targets'] = parser
+
+            # Open Targets is large (39K diseases, 78K targets, millions of associations)
+            # We'll load it on-demand during validation to avoid memory issues
+
+            self._print("[green]✓ Open Targets database ready (on-demand queries)[/green]")
+
+        except Exception as e:
+            self._print(f"[red]✗ Failed to load Open Targets: {e}[/red]")
+
     def validate_gene_set(
         self,
         gene_set: Set[str],
@@ -327,14 +349,14 @@ class LocalValidationClient:
             Dict mapping database names to lists of significant enrichment results
         """
         if databases is None:
-            databases = ['gencc', 'hpo_phenotypes', 'hpo_diseases', 'gwas', 'orphanet', 'clinvar', 'monarch']
+            databases = ['gencc', 'hpo_phenotypes', 'hpo_diseases', 'gwas', 'orphanet', 'clinvar', 'monarch', 'open_targets']
 
         # Filter to available databases
         available_dbs = []
         for db in databases:
-            if db == 'monarch':
-                # Monarch is query-based, check if parser exists
-                if 'monarch' in self.parsers:
+            if db in ['monarch', 'open_targets']:
+                # Monarch and Open Targets are query-based, check if parser exists
+                if db in self.parsers:
                     available_dbs.append(db)
             elif db in self.data and self.data[db]['terms_to_genes']:
                 available_dbs.append(db)
@@ -375,6 +397,31 @@ class LocalValidationClient:
                         )
                         significant = analyzer.filter_significant(enrichment_results)
                         results['monarch'] = significant
+                continue
+
+            # Handle Open Targets specially (query-based)
+            if db_name == 'open_targets':
+                if 'open_targets' in self.parsers:
+                    # Query diseases for all genes in set
+                    associations = list(self.parsers['open_targets'].query_genes_batch(gene_set))
+
+                    # Build disease→genes index from associations
+                    terms_to_genes = defaultdict(set)
+                    term_names = {}
+
+                    for assoc in associations:
+                        terms_to_genes[assoc.disease_id].add(assoc.gene_symbol)
+                        term_names[assoc.disease_id] = assoc.disease_name
+
+                    if terms_to_genes:
+                        enrichment_results = analyzer.test_multiple_terms(
+                            query_genes=gene_set,
+                            term_to_genes=dict(terms_to_genes),
+                            term_to_name=term_names,
+                            source='open_targets',
+                        )
+                        significant = analyzer.filter_significant(enrichment_results)
+                        results['open_targets'] = significant
                 continue
 
             db_data = self.data[db_name]
