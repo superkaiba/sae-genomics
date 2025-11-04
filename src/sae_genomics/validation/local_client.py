@@ -13,6 +13,11 @@ from .parsers import (
     GWASCatalogParser,
     STRINGParser,
     OrphanetParser,
+    ClinVarParser,
+    DisGeNETParser,
+    OMIMParser,
+    MonarchParser,
+    OpenTargetsParser,
 )
 from .enrichment import EnrichmentAnalyzer, EnrichmentResult
 
@@ -55,6 +60,7 @@ class LocalValidationClient:
             'hpo_diseases': {'terms_to_genes': {}, 'term_names': {}},
             'gwas': {'terms_to_genes': {}, 'term_names': {}},
             'orphanet': {'terms_to_genes': {}, 'term_names': {}},
+            'clinvar': {'terms_to_genes': {}, 'term_names': {}},
             'all_genes': set(),
         }
 
@@ -100,6 +106,11 @@ class LocalValidationClient:
         string_dir = self.databases_dir / 'string'
         if string_dir.exists():
             self._load_string(string_dir)
+
+        # Load ClinVar
+        clinvar_dir = self.databases_dir / 'clinvar'
+        if clinvar_dir.exists():
+            self._load_clinvar(clinvar_dir)
 
         # Summary
         n_genes = len(self.data['all_genes'])
@@ -243,6 +254,41 @@ class LocalValidationClient:
         except Exception as e:
             self._print(f"[red]✗ Failed to load STRING: {e}[/red]")
 
+    def _load_clinvar(self, clinvar_dir: Path):
+        """Load ClinVar database."""
+        try:
+            self._print("[blue]Loading ClinVar...[/blue]")
+            parser = ClinVarParser(clinvar_dir, pathogenic_only=True)
+            self.parsers['clinvar'] = parser
+
+            terms = defaultdict(set)
+            names = {}
+
+            # ClinVar is large - limit parsing to avoid memory issues
+            count = 0
+            max_variants = 100000  # Limit to first 100k variants
+
+            for assoc in parser.parse_gene_disease_associations():
+                if count >= max_variants:
+                    break
+
+                terms[assoc.disease_id].add(assoc.gene_symbol)
+                names[assoc.disease_id] = assoc.disease_name
+                self.data['all_genes'].add(assoc.gene_symbol)
+                count += 1
+
+                # Progress update every 10k
+                if count % 10000 == 0 and self.verbose:
+                    console.print(f"  Parsed {count:,} variants...", end='\r')
+
+            self.data['clinvar']['terms_to_genes'] = dict(terms)
+            self.data['clinvar']['term_names'] = names
+
+            self._print(f"[green]✓ Loaded {len(terms)} conditions from ClinVar ({count:,} variants)[/green]")
+
+        except Exception as e:
+            self._print(f"[red]✗ Failed to load ClinVar: {e}[/red]")
+
     def validate_gene_set(
         self,
         gene_set: Set[str],
@@ -262,7 +308,7 @@ class LocalValidationClient:
             Dict mapping database names to lists of significant enrichment results
         """
         if databases is None:
-            databases = ['gencc', 'hpo_phenotypes', 'hpo_diseases', 'gwas', 'orphanet']
+            databases = ['gencc', 'hpo_phenotypes', 'hpo_diseases', 'gwas', 'orphanet', 'clinvar']
 
         # Filter to available databases
         databases = [db for db in databases if db in self.data and self.data[db]['terms_to_genes']]
