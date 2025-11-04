@@ -33,18 +33,17 @@ class OpenTargetsDownloader(DatabaseDownloader):
         Args:
             output_dir: Directory to store downloaded files
             datasets: List of datasets to download. Options:
-                - 'diseases': Disease information
-                - 'targets': Target (gene) information
-                - 'associations': Gene-disease associations (recommended)
-                - 'evidence': Supporting evidence (very large)
+                - 'disease': Disease information
+                - 'target': Target (gene) information
+                - 'association_by_datasource_direct': Gene-disease associations (recommended)
             **kwargs: Additional arguments
         """
         super().__init__(output_dir, **kwargs)
         # Default: only download gene-disease associations (smallest useful subset)
         self.datasets = datasets or [
-            'diseases',
-            'targets',
-            'associationByDatasourceDirect',  # Direct associations
+            'disease',
+            'target',
+            'association_by_datasource_direct',  # Direct associations
         ]
 
     def get_latest_version(self) -> str:
@@ -91,7 +90,7 @@ class OpenTargetsDownloader(DatabaseDownloader):
         urls = []
         for dataset in self.datasets:
             urls.append({
-                'url': f"{self.HTTP_BASE}/{version}/output/etl/parquet/{dataset}/",
+                'url': f"{self.HTTP_BASE}/{version}/output/{dataset}/",
                 'path': dataset,
                 'type': 'directory',
                 'decompress': False
@@ -134,7 +133,7 @@ class OpenTargetsDownloader(DatabaseDownloader):
                     '--recursive',  # Recursive download
                     '--no-parent',  # Don't ascend to parent directory
                     '--no-host-directories',  # Don't create host directory
-                    '--cut-dirs=6',  # Skip 6 directory levels in URL
+                    '--cut-dirs=5',  # Skip 5 directory levels in URL
                     '--reject=index.html*',  # Skip index files
                     '--accept=*.parquet',  # Only download parquet files
                     '-P', str(local_path.parent),  # Output directory

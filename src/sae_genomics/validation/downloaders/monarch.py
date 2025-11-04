@@ -63,12 +63,12 @@ class MonarchDownloader(DatabaseDownloader):
             List of files to download
         """
         if self.format == 'duckdb':
-            # DuckDB format (fastest for queries)
+            # DuckDB format (fastest for queries) - no compression
             return [
                 {
-                    'url': f"{self.BASE_URL}/latest/monarch-kg.duckdb.gz",
-                    'path': 'monarch-kg.duckdb.gz',
-                    'decompress': True,
+                    'url': f"{self.BASE_URL}/latest/monarch-kg.duckdb",
+                    'path': 'monarch-kg.duckdb',
+                    'decompress': False,
                 }
             ]
         elif self.format == 'sqlite':
@@ -81,15 +81,15 @@ class MonarchDownloader(DatabaseDownloader):
                 }
             ]
         elif self.format == 'tsv':
-            # TSV KGX format (nodes and edges separately)
+            # TSV KGX format (nodes and edges in tsv/ directory)
             return [
                 {
-                    'url': f"{self.BASE_URL}/latest/monarch-kg-denormalized-edges.tsv.gz",
+                    'url': f"{self.BASE_URL}/latest/tsv/monarch_kg_edges.tsv.gz",
                     'path': 'monarch-kg-edges.tsv.gz',
                     'decompress': True,
                 },
                 {
-                    'url': f"{self.BASE_URL}/latest/monarch-kg-denormalized-nodes.tsv.gz",
+                    'url': f"{self.BASE_URL}/latest/tsv/monarch_kg_nodes.tsv.gz",
                     'path': 'monarch-kg-nodes.tsv.gz',
                     'decompress': True,
                 }
