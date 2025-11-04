@@ -125,12 +125,36 @@ def main():
     )
     console.print(f"✓ Loaded {args.model_size} model")
 
-    # Create feature analyzer
-    # Get vocab dict from GeneVocab object
+    # Create feature analyzer with gene symbol mapping
+    # Get vocab dict from GeneVocab object (maps Ensembl ID -> token ID)
     vocab_dict = tahoe_adapter.vocab.get_stoi()
+
+    # Create reverse vocab that maps token ID -> gene symbol (not Ensembl ID!)
+    # This requires loading the AnnData to get the Ensembl ID -> symbol mapping
+    console.print("Building gene symbol vocabulary...")
+    adata_for_vocab = sc.read_h5ad(args.data)
+
+    # Create mapping: Ensembl ID -> gene symbol
+    ensembl_to_symbol = {}
+    for gene_symbol in adata_for_vocab.var.index:
+        ensembl_id = adata_for_vocab.var.loc[gene_symbol, 'ensembl_id']
+        ensembl_to_symbol[ensembl_id] = gene_symbol
+
+    # Build reverse vocab: token ID -> gene symbol
+    reverse_vocab = {}
+    for ensembl_id, token_id in vocab_dict.items():
+        if ensembl_id in ensembl_to_symbol:
+            gene_symbol = ensembl_to_symbol[ensembl_id]
+            reverse_vocab[token_id] = gene_symbol
+        else:
+            # Keep original ID for unmapped genes or special tokens
+            reverse_vocab[token_id] = ensembl_id
+
+    console.print(f"✓ Mapped {len(ensembl_to_symbol)} genes to symbols")
+
     analyzer = FeatureAnalyzer(
         vocab=vocab_dict,
-        reverse_vocab={v: k for k, v in vocab_dict.items()},
+        reverse_vocab=reverse_vocab,
     )
 
     # Step 3: Load or extract activations

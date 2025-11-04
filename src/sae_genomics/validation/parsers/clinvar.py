@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Iterator, Optional, Set, Dict, List
 import gzip
-import re
+import csv
 
 from .base import DatabaseParser, GeneDiseaseAssociation
 
@@ -49,12 +49,9 @@ class ClinVarParser(DatabaseParser):
     ClinVar aggregates information about genomic variation and its
     relationship to human health.
 
-    File format: VCF (Variant Call Format) with INFO field containing:
-        - GENEINFO: Gene symbol and ID
-        - CLNSIG: Clinical significance
-        - CLNDN: Disease name
-        - CLNDISDB: Disease database IDs
-        - CLNREVSTAT: Review status
+    Supports two file formats:
+    1. VCF (Variant Call Format) - clinvar*.vcf or clinvar*.vcf.gz
+    2. TSV (Tab-Separated Values) - variant_summary.txt
     """
 
     def __init__(
@@ -66,7 +63,7 @@ class ClinVarParser(DatabaseParser):
         """Initialize ClinVar parser.
 
         Args:
-            data_dir: Directory containing ClinVar VCF files
+            data_dir: Directory containing ClinVar files
             pathogenic_only: Only include pathogenic/likely pathogenic variants
             reviewed_only: Only include variants with expert review
         """
@@ -74,23 +71,48 @@ class ClinVarParser(DatabaseParser):
         self.pathogenic_only = pathogenic_only
         self.reviewed_only = reviewed_only
 
-        # Find VCF file (may be gzipped)
+        # Find ClinVar file (TSV or VCF)
+        tsv_files = list(self.data_dir.glob('variant_summary.txt*'))
         vcf_files = (
             list(self.data_dir.glob('clinvar*.vcf.gz')) +
             list(self.data_dir.glob('clinvar*.vcf'))
         )
 
-        if not vcf_files:
+        if tsv_files:
+            self.data_file = tsv_files[0]
+            self.file_format = 'tsv'
+            self.is_gzipped = self.data_file.suffix == '.gz'
+        elif vcf_files:
+            self.data_file = vcf_files[0]
+            self.file_format = 'vcf'
+            self.is_gzipped = self.data_file.suffix == '.gz'
+        else:
             raise FileNotFoundError(
-                f"ClinVar VCF file not found in {self.data_dir}. "
-                f"Expected: clinvar*.vcf or clinvar*.vcf.gz"
+                f"ClinVar file not found in {self.data_dir}. "
+                f"Expected: variant_summary.txt or clinvar*.vcf"
             )
 
-        self.vcf_file = vcf_files[0]
-        self.is_gzipped = self.vcf_file.suffix == '.gz'
-
     def parse_variants(self) -> Iterator[ClinVarVariant]:
-        """Parse ClinVar variants from VCF.
+        """Parse ClinVar variants.
+
+        Yields:
+            ClinVarVariant objects
+        """
+        if self.file_format == 'tsv':
+            yield from self._parse_variants_tsv()
+        else:
+            yield from self._parse_variants_vcf()
+
+    def _parse_variants_tsv(self) -> Iterator[ClinVarVariant]:
+        """Parse ClinVar variants from TSV format.
+
+        TSV columns (variant_summary.txt):
+        - GeneSymbol: Gene symbol
+        - ClinicalSignificance: Clinical significance
+        - PhenotypeList: Disease names (pipe-separated)
+        - PhenotypeIDS: Phenotype IDs
+        - RCVaccession: Variant ID
+        - ReviewStatus: Review status
 
         Yields:
             ClinVarVariant objects
@@ -98,7 +120,67 @@ class ClinVarParser(DatabaseParser):
         open_func = gzip.open if self.is_gzipped else open
         mode = 'rt' if self.is_gzipped else 'r'
 
-        with open_func(self.vcf_file, mode) as f:
+        with open_func(self.data_file, mode, encoding='utf-8', errors='ignore') as f:
+            reader = csv.DictReader(f, delimiter='\t')
+
+            for row in reader:
+                gene_symbol = row.get('GeneSymbol', '').strip()
+                if not gene_symbol or gene_symbol == '-':
+                    continue
+
+                clinical_sig = row.get('ClinicalSignificance', '').strip()
+                if not clinical_sig or clinical_sig == '-':
+                    continue
+
+                # Filter by pathogenicity
+                if self.pathogenic_only:
+                    if not self._is_pathogenic(clinical_sig):
+                        continue
+
+                phenotype_list = row.get('PhenotypeList', '').strip()
+                if not phenotype_list or phenotype_list == '-':
+                    continue
+
+                review_status = row.get('ReviewStatus', '').strip()
+
+                # Filter by review status
+                if self.reviewed_only:
+                    if not self._has_expert_review(review_status):
+                        continue
+
+                variant_id = row.get('RCVaccession', '').strip()
+                if not variant_id:
+                    variant_id = row.get('VariationID', '').strip()
+
+                # Parse phenotype IDs
+                phenotype_ids_str = row.get('PhenotypeIDS', '').strip()
+                phenotype_ids = self._parse_phenotype_ids(phenotype_ids_str)
+
+                # Split multiple diseases
+                diseases = [d.strip() for d in phenotype_list.split('|') if d.strip()]
+
+                # Yield variant for each disease
+                for disease in diseases:
+                    if disease and disease != '-':
+                        yield ClinVarVariant(
+                            variant_id=variant_id,
+                            gene_symbol=gene_symbol,
+                            disease_name=disease,
+                            clinical_significance=clinical_sig,
+                            review_status=review_status,
+                            phenotype_ids=phenotype_ids,
+                        )
+
+    def _parse_variants_vcf(self) -> Iterator[ClinVarVariant]:
+        """Parse ClinVar variants from VCF format.
+
+        Yields:
+            ClinVarVariant objects
+        """
+        open_func = gzip.open if self.is_gzipped else open
+        mode = 'rt' if self.is_gzipped else 'r'
+
+        with open_func(self.data_file, mode) as f:
             for line in f:
                 # Skip header lines
                 if line.startswith('#'):
@@ -236,23 +318,24 @@ class ClinVarParser(DatabaseParser):
                 info[item] = True
         return info
 
-    def _parse_phenotype_ids(self, disease_db: str) -> List[str]:
-        """Parse phenotype IDs from CLNDISDB field.
+    def _parse_phenotype_ids(self, phenotype_str: str) -> List[str]:
+        """Parse phenotype IDs from string.
 
         Args:
-            disease_db: CLNDISDB field value (e.g., "MedGen:C0123456,OMIM:123456")
+            phenotype_str: Phenotype IDs string (various formats)
 
         Returns:
             List of phenotype IDs
         """
-        if not disease_db or disease_db == '.':
+        if not phenotype_str or phenotype_str in ['.', '-']:
             return []
 
         ids = []
-        for entry in disease_db.split('|'):
-            for db_entry in entry.split(','):
-                if ':' in db_entry:
-                    ids.append(db_entry.strip())
+        # Handle both comma and pipe separators
+        for entry in phenotype_str.replace('|', ',').split(','):
+            entry = entry.strip()
+            if ':' in entry or entry.startswith('C'):  # MedGen format
+                ids.append(entry)
         return ids
 
     def _is_pathogenic(self, clnsig: str) -> bool:
