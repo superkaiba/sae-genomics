@@ -112,21 +112,24 @@ class EnrichmentAnalyzer:
         d = self.background_size - a - b - c  # NOT in query, NOT in term
 
         # Ensure no negative values (can happen with inconsistent gene sets)
-        if b < 0 or c < 0 or d < 0:
+        if a < 0 or b < 0 or c < 0 or d < 0:
+            import sys
+            print(
+                f"Warning: Negative contingency table value for {term_id}: "
+                f"a={a}, b={b}, c={c}, d={d}. Skipping this term.",
+                file=sys.stderr
+            )
             return None
 
         # Fisher's exact test (one-sided: test for over-representation)
-        try:
-            odds_ratio, p_value = fisher_exact([[a, b], [c, d]], alternative='greater')
-        except Exception:
-            return None
+        odds_ratio, p_value = fisher_exact([[a, b], [c, d]], alternative='greater')
 
         return EnrichmentResult(
             term_id=term_id,
             term_name=term_name,
             p_value=p_value,
             p_value_adjusted=p_value,  # Will be corrected later
-            odds_ratio=odds_ratio if odds_ratio != float('inf') else 999.0,
+            odds_ratio=odds_ratio,  # Keep infinity as-is (scientifically meaningful)
             genes_in_query=len(query_genes & self.background_genes),
             genes_in_term=len(term_genes & self.background_genes),
             genes_overlap=overlap_count,

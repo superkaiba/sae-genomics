@@ -126,37 +126,35 @@ class OpenTargetsParser:
 
         # Read association files and filter for this gene
         for assoc_file in association_files:
-            try:
-                # Read parquet file
-                df = pd.read_parquet(
-                    assoc_file,
-                    columns=['targetId', 'diseaseId', 'score', 'datasourceId'],
-                    filters=[('targetId', '==', target_id)]
-                )
+            # Read parquet file with selected columns
+            # Note: Not using filters parameter to ensure compatibility across pandas/pyarrow versions
+            df = pd.read_parquet(
+                assoc_file,
+                columns=['targetId', 'diseaseId', 'score', 'datasourceId']
+            )
 
-                # Filter by score threshold
-                df = df[df['score'] >= self.score_threshold]
+            # Filter for target gene and score threshold
+            df = df[
+                (df['targetId'] == target_id) &
+                (df['score'] >= self.score_threshold)
+            ]
 
-                # Convert to associations
-                for _, row in df.iterrows():
-                    disease_name = disease_index.get(row['diseaseId'], row['diseaseId'])
+            # Convert to associations
+            for _, row in df.iterrows():
+                disease_name = disease_index.get(row['diseaseId'], row['diseaseId'])
 
-                    associations.append(GeneDiseaseAssociation(
-                        gene_id=target_id,
-                        gene_symbol=gene_symbol,
-                        disease_id=row['diseaseId'],
-                        disease_name=disease_name,
-                        source=f"open_targets_{row['datasourceId']}",
-                        score=float(row['score']),
-                        evidence_level=self._map_score_to_evidence(row['score']),
-                        metadata={
-                            'datasource': row['datasourceId'],
-                        }
-                    ))
-
-            except Exception:
-                # Skip files that don't contain this gene
-                continue
+                associations.append(GeneDiseaseAssociation(
+                    gene_id=target_id,
+                    gene_symbol=gene_symbol,
+                    disease_id=row['diseaseId'],
+                    disease_name=disease_name,
+                    source=f"open_targets_{row['datasourceId']}",
+                    score=float(row['score']),
+                    evidence_level=self._map_score_to_evidence(row['score']),
+                    metadata={
+                        'datasource': row['datasourceId'],
+                    }
+                ))
 
         return associations
 

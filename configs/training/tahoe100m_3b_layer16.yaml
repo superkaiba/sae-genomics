@@ -1,0 +1,50 @@
+# Training configuration for Tahoe-100M dataset
+# Large-scale SAE training on 3B model, layer 16
+
+# Model configuration
+model_size: "3b"  # Tahoe X1 3B model (d_model=2560)
+layer: 16  # Middle layer (16 out of 32 layers)
+hook_point: "blocks.16.hook_mlp_out"  # After MLP at layer 16
+
+# SAE Architecture
+d_sae: 40960  # Dictionary size: 16 × 2560 = 40,960 features
+expansion_factor: 16  # d_sae / d_in = 40,960 / 2,560 = 16
+k: 64  # TopK activation (number of active features)
+activation: "topk"  # TopK activation function
+
+# Training hyperparameters
+lr: 3.0e-4  # Learning rate
+batch_size: 32  # Batch size for training
+max_length: 1024  # Maximum sequence length
+num_workers: 8  # DataLoader workers
+
+# Training duration
+steps: 100000  # Total training steps (100K steps for large dataset)
+eval_interval: 1000  # Evaluate every 1000 steps
+save_interval: 5000  # Save checkpoint every 5000 steps
+log_interval: 100  # Log metrics every 100 steps
+
+# Dataset
+dataset: "tahoe_100m"  # Tahoe-100M expression data
+data_path: "data/tahoe_100m/expression_data"  # Path to downloaded dataset
+train_split: 0.9  # 90% for training
+val_split: 0.1  # 10% for validation
+max_cells: null  # Use all 95.6M cells (no limit)
+
+# Optimization
+optimizer: "adam"  # Adam optimizer
+weight_decay: 0.0  # No weight decay
+lr_scheduler: "constant"  # Constant learning rate
+grad_clip: 1.0  # Gradient clipping threshold
+
+# Device
+device: "cuda"  # Use GPU
+mixed_precision: true  # Use mixed precision (fp16/bf16)
+
+# Dead neuron handling
+dead_neuron_threshold: 10000  # Steps before considering neuron dead
+dead_neuron_resampling: true  # Resample dead neurons
+
+# Checkpointing
+checkpoint_dir: "results/tahoe100m_3b_layer16"  # Output directory
+save_best: true  # Save best checkpoint based on val loss

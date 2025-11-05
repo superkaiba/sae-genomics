@@ -203,15 +203,25 @@ class SAETrainer:
         )
         sae_inference = TopKSAE(config)
 
-        # Copy weights (use strict=True to catch mismatches)
+        # Copy weights - filter to only include keys that exist in inference SAE
+        # (Training SAE has auxiliary loss parameters that inference SAE doesn't need)
         state_dict = self.sae.state_dict()
-        try:
-            sae_inference.load_state_dict(state_dict, strict=True)
-        except RuntimeError as e:
-            # If strict loading fails, fall back to non-strict with a warning
-            print(f"Warning: Strict state dict loading failed: {e}")
-            print("Falling back to non-strict loading. Some weights may not match.")
-            sae_inference.load_state_dict(state_dict, strict=False)
+        inference_keys = set(sae_inference.state_dict().keys())
+        filtered_state_dict = {k: v for k, v in state_dict.items() if k in inference_keys}
+
+        # Load with strict=False and check for issues
+        missing_keys, unexpected_keys = sae_inference.load_state_dict(filtered_state_dict, strict=False)
+
+        # Missing keys in inference SAE are a critical error
+        if missing_keys:
+            raise RuntimeError(
+                f"Failed to convert training SAE to inference SAE. "
+                f"Missing required keys: {missing_keys}"
+            )
+
+        # Unexpected keys are fine (they're training-only parameters)
+        if unexpected_keys:
+            print(f"Note: Skipped training-only parameters: {unexpected_keys}", file=sys.stderr)
 
         torch.save({
             "sae_state_dict": sae_inference.state_dict(),
@@ -220,7 +230,6 @@ class SAETrainer:
             "activation": self.activation,
             "k": self.k,
         }, path)
-        import sys
         print(f"Saved checkpoint to {path}", file=sys.stderr)
 
     @classmethod

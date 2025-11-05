@@ -92,6 +92,9 @@ class FeatureAnalyzer:
                 # Run through SAE to get feature activations
                 feature_acts = sae.encode(cell_acts_flat)  # (seq_len, d_sae)
 
+                # Track which features are active in this cell (for correct counting)
+                cell_active_features = set()
+
                 # For each position in the sequence
                 for pos in range(seq_len):
                     gene_id = cell_genes[pos].item()
@@ -114,7 +117,12 @@ class FeatureAnalyzer:
                         score = feat_activation * gene_expr
 
                         feature_gene_scores[feat_idx][gene_id] += score
-                        feature_activation_counts[feat_idx] += 1
+                        # Track that this feature was active in this cell
+                        cell_active_features.add(feat_idx)
+
+                # After processing all positions in the cell, increment counts once per cell
+                for feat_idx in cell_active_features:
+                    feature_activation_counts[feat_idx] += 1
 
         # Convert to readable format
         feature_results = {}

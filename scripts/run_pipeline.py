@@ -265,9 +265,25 @@ Started: {start_time.strftime('%Y-%m-%d %H:%M:%S')}
         console.print("[bold magenta]STEP 2/3: EXTRACTING FEATURE ACTIVATIONS[/bold magenta]")
         console.print("=" * 70)
 
-        sae_checkpoint = args.output / "sae_final.pt"
-        if not sae_checkpoint.exists():
-            console.print(f"[red]Error: SAE checkpoint not found: {sae_checkpoint}[/red]")
+        # Check for SAE checkpoint in multiple possible locations
+        possible_checkpoints = [
+            args.output / "sae_final.pt",
+            args.output / "checkpoints" / "final_checkpoint.pt",
+            args.output / "final_checkpoint.pt",
+        ]
+
+        sae_checkpoint = None
+        for path in possible_checkpoints:
+            if path.exists():
+                sae_checkpoint = path
+                console.print(f"[green]Found SAE checkpoint: {sae_checkpoint}[/green]")
+                break
+
+        if sae_checkpoint is None:
+            console.print(f"[red]Error: No SAE checkpoint found in {args.output}[/red]")
+            console.print(f"Checked locations:")
+            for path in possible_checkpoints:
+                console.print(f"  - {path}")
             console.print("Please run training first or check output directory")
             sys.exit(1)
 

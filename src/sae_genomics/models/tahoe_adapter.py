@@ -167,15 +167,15 @@ class TahoeModelAdapter:
                         f"Available keys: {list(batch.keys())}"
                     )
             else:
+                # Batch is not a dict, must be a Tensor
                 if not isinstance(batch, torch.Tensor):
                     raise TypeError(
                         f"Expected batch to be dict or Tensor, got {type(batch).__name__}"
                     )
-                batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v
-                        for k, v in batch.items()}
-                if self.device.type == 'cuda':
-                    batch = {k: v.to(torch.bfloat16) if isinstance(v, torch.Tensor) and v.dtype == torch.float32 else v
-                            for k, v in batch.items()}
+                # Handle tensor batch: move to device and convert dtype
+                batch = batch.to(self.device)
+                if self.device.type == 'cuda' and batch.dtype == torch.float32:
+                    batch = batch.to(torch.bfloat16)
                 gene_ids_batch = batch
 
             # Forward pass - Tahoe model expects a dict with gene, expr, etc.
@@ -256,7 +256,6 @@ class TahoeModelAdapter:
 
         gene_ids_in_vocab = np.array(adata.var["id_in_vocab"])
         n_matched = np.sum(gene_ids_in_vocab >= 0)
-        import sys
         print(f"Matched {n_matched}/{len(gene_ids_in_vocab)} genes to vocabulary", file=sys.stderr)
 
         # Validate that at least some genes matched

@@ -189,10 +189,8 @@ def main():
 
     # Now extract full dataset
     console.print("Extracting full activations...")
-    max_batches = min(
-        len(dataloader),
-        (train_config.total_training_steps * train_config.batch_size) // train_config.batch_size,
-    )
+    # Calculate how many batches we need for the desired number of training steps
+    max_batches = min(len(dataloader), train_config.total_training_steps)
     activations, gene_ids = tahoe_adapter.extract_activations(
         dataloader,
         max_batches=max_batches,

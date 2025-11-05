@@ -136,9 +136,19 @@ def main():
 
     # Create mapping: Ensembl ID -> gene symbol
     ensembl_to_symbol = {}
-    for gene_symbol in adata_for_vocab.var.index:
-        ensembl_id = adata_for_vocab.var.loc[gene_symbol, 'ensembl_id']
-        ensembl_to_symbol[ensembl_id] = gene_symbol
+
+    # Check if we have a gene_symbol column, otherwise use index
+    if 'gene_symbol' in adata_for_vocab.var.columns:
+        console.print("Using gene_symbol column for gene names")
+        for idx in adata_for_vocab.var.index:
+            ensembl_id = adata_for_vocab.var.loc[idx, 'ensembl_id']
+            gene_symbol = adata_for_vocab.var.loc[idx, 'gene_symbol']
+            ensembl_to_symbol[ensembl_id] = gene_symbol
+    else:
+        console.print("[yellow]Warning: No gene_symbol column found, using index as gene names[/yellow]")
+        for idx in adata_for_vocab.var.index:
+            ensembl_id = adata_for_vocab.var.loc[idx, 'ensembl_id']
+            ensembl_to_symbol[ensembl_id] = str(idx)
 
     # Build reverse vocab: token ID -> gene symbol
     reverse_vocab = {}

@@ -255,34 +255,41 @@ class ClinVarParser(DatabaseParser):
         """Parse ClinVar gene-disease associations.
 
         Aggregates variants by gene-disease pairs and counts pathogenic variants.
+        Uses incremental aggregation to minimize memory usage.
 
         Yields:
             GeneDiseaseAssociation objects
         """
-        # Aggregate variants by gene-disease
-        gene_disease_variants: Dict[tuple, List[ClinVarVariant]] = {}
+        from collections import defaultdict
+
+        # Aggregate metadata by gene-disease without storing full variant objects
+        gene_disease_stats = defaultdict(lambda: {
+            'n_variants': 0,
+            'n_pathogenic': 0,
+            'phenotype_ids': set(),
+            'review_statuses': []
+        })
 
         for variant in self.parse_variants():
             key = (variant.gene_symbol, variant.disease_name)
-            if key not in gene_disease_variants:
-                gene_disease_variants[key] = []
-            gene_disease_variants[key].append(variant)
+            stats = gene_disease_stats[key]
+
+            # Increment counts
+            stats['n_variants'] += 1
+            if variant.is_pathogenic():
+                stats['n_pathogenic'] += 1
+
+            # Accumulate metadata
+            stats['phenotype_ids'].update(variant.phenotype_ids)
+            stats['review_statuses'].append(variant.review_status)
 
         # Create associations
-        for (gene_symbol, disease_name), variants in gene_disease_variants.items():
-            # Count pathogenic variants
-            n_pathogenic = sum(1 for v in variants if v.is_pathogenic())
-
-            # Get unique phenotype IDs
-            phenotype_ids = set()
-            for v in variants:
-                phenotype_ids.update(v.phenotype_ids)
-
+        for (gene_symbol, disease_name), stats in gene_disease_stats.items():
             # Determine evidence level based on review status
-            review_statuses = [v.review_status for v in variants]
-            evidence_level = self._aggregate_evidence_level(review_statuses)
+            evidence_level = self._aggregate_evidence_level(stats['review_statuses'])
 
             # Use first disease ID or disease name
+            phenotype_ids = stats['phenotype_ids']
             disease_id = list(phenotype_ids)[0] if phenotype_ids else disease_name
 
             yield GeneDiseaseAssociation(
@@ -292,10 +299,10 @@ class ClinVarParser(DatabaseParser):
                 disease_name=disease_name,
                 source='clinvar',
                 evidence_level=evidence_level,
-                score=float(n_pathogenic),  # Number of pathogenic variants
+                score=float(stats['n_pathogenic']),  # Number of pathogenic variants
                 metadata={
-                    'n_variants': len(variants),
-                    'n_pathogenic': n_pathogenic,
+                    'n_variants': stats['n_variants'],
+                    'n_pathogenic': stats['n_pathogenic'],
                     'phenotype_ids': list(phenotype_ids),
                 }
             )

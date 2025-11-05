@@ -61,6 +61,9 @@ class LocalValidationClient:
             'clinvar': {'terms_to_genes': {}, 'term_names': {}},
             'monarch': {'terms_to_genes': {}, 'term_names': {}},
             'open_targets': {'terms_to_genes': {}, 'term_names': {}},
+            # NOTE: all_genes uses gene_symbol (most portable across databases)
+            # For Ensembl ID-based enrichment, gene symbols must be mapped to Ensembl IDs
+            # TODO: Add symbol-to-Ensembl mapping infrastructure for proper ID-based enrichment
             'all_genes': set(),
         }
 
@@ -128,207 +131,181 @@ class LocalValidationClient:
 
     def _load_gencc(self, gencc_dir: Path):
         """Load GenCC database."""
-        try:
-            self._print("[blue]Loading GenCC...[/blue]")
-            parser = GenCCParser(gencc_dir)
-            self.parsers['gencc'] = parser
+        self._print("[blue]Loading GenCC...[/blue]")
+        parser = GenCCParser(gencc_dir)
+        self.parsers['gencc'] = parser
 
-            terms = defaultdict(set)
-            names = {}
+        terms = defaultdict(set)
+        names = {}
 
-            for assoc in track(
-                list(parser.parse_gene_disease_associations()),
-                description="Parsing GenCC",
-                disable=not self.verbose,
-            ):
-                terms[assoc.disease_id].add(assoc.gene_symbol)
-                names[assoc.disease_id] = assoc.disease_name
-                self.data['all_genes'].add(assoc.gene_symbol)
+        for assoc in track(
+            list(parser.parse_gene_disease_associations()),
+            description="Parsing GenCC",
+            disable=not self.verbose,
+        ):
+            terms[assoc.disease_id].add(assoc.gene_symbol)
+            names[assoc.disease_id] = assoc.disease_name
+            self.data['all_genes'].add(assoc.gene_symbol)
 
-            self.data['gencc']['terms_to_genes'] = dict(terms)
-            self.data['gencc']['term_names'] = names
+        self.data['gencc']['terms_to_genes'] = dict(terms)
+        self.data['gencc']['term_names'] = names
 
-            self._print(f"[green]✓ Loaded {len(terms)} diseases from GenCC[/green]")
-
-        except Exception as e:
-            self._print(f"[red]✗ Failed to load GenCC: {e}[/red]")
+        self._print(f"[green]✓ Loaded {len(terms)} diseases from GenCC[/green]")
 
     def _load_hpo(self, hpo_dir: Path):
         """Load HPO database."""
-        try:
-            self._print("[blue]Loading HPO...[/blue]")
-            parser = HPOParser(hpo_dir)
-            self.parsers['hpo'] = parser
+        self._print("[blue]Loading HPO...[/blue]")
+        parser = HPOParser(hpo_dir)
+        self.parsers['hpo'] = parser
 
-            # Phenotype associations
-            pheno_terms = defaultdict(set)
-            pheno_names = {}
+        # Phenotype associations
+        pheno_terms = defaultdict(set)
+        pheno_names = {}
 
-            for assoc in track(
-                list(parser.parse_gene_phenotype_associations()),
-                description="Parsing HPO phenotypes",
-                disable=not self.verbose,
-            ):
-                pheno_terms[assoc.phenotype_id].add(assoc.gene_symbol)
-                pheno_names[assoc.phenotype_id] = assoc.phenotype_name
-                self.data['all_genes'].add(assoc.gene_symbol)
+        for assoc in track(
+            list(parser.parse_gene_phenotype_associations()),
+            description="Parsing HPO phenotypes",
+            disable=not self.verbose,
+        ):
+            pheno_terms[assoc.phenotype_id].add(assoc.gene_symbol)
+            pheno_names[assoc.phenotype_id] = assoc.phenotype_name
+            self.data['all_genes'].add(assoc.gene_symbol)
 
-            self.data['hpo_phenotypes']['terms_to_genes'] = dict(pheno_terms)
-            self.data['hpo_phenotypes']['term_names'] = pheno_names
+        self.data['hpo_phenotypes']['terms_to_genes'] = dict(pheno_terms)
+        self.data['hpo_phenotypes']['term_names'] = pheno_names
 
-            # Disease associations
-            disease_terms = defaultdict(set)
-            disease_names = {}
+        # Disease associations
+        disease_terms = defaultdict(set)
+        disease_names = {}
 
-            for assoc in track(
-                list(parser.parse_gene_disease_associations()),
-                description="Parsing HPO diseases",
-                disable=not self.verbose,
-            ):
-                disease_terms[assoc.disease_id].add(assoc.gene_symbol)
-                disease_names[assoc.disease_id] = assoc.disease_name
-                self.data['all_genes'].add(assoc.gene_symbol)
+        for assoc in track(
+            list(parser.parse_gene_disease_associations()),
+            description="Parsing HPO diseases",
+            disable=not self.verbose,
+        ):
+            disease_terms[assoc.disease_id].add(assoc.gene_symbol)
+            disease_names[assoc.disease_id] = assoc.disease_name
+            self.data['all_genes'].add(assoc.gene_symbol)
 
-            self.data['hpo_diseases']['terms_to_genes'] = dict(disease_terms)
-            self.data['hpo_diseases']['term_names'] = disease_names
+        self.data['hpo_diseases']['terms_to_genes'] = dict(disease_terms)
+        self.data['hpo_diseases']['term_names'] = disease_names
 
-            self._print(
-                f"[green]✓ Loaded {len(pheno_terms)} phenotypes and "
-                f"{len(disease_terms)} diseases from HPO[/green]"
-            )
-
-        except Exception as e:
-            self._print(f"[red]✗ Failed to load HPO: {e}[/red]")
+        self._print(
+            f"[green]✓ Loaded {len(pheno_terms)} phenotypes and "
+            f"{len(disease_terms)} diseases from HPO[/green]"
+        )
 
     def _load_gwas(self, gwas_dir: Path):
         """Load GWAS Catalog."""
-        try:
-            self._print("[blue]Loading GWAS Catalog...[/blue]")
-            parser = GWASCatalogParser(gwas_dir, p_value_threshold=5e-8)
-            self.parsers['gwas'] = parser
+        self._print("[blue]Loading GWAS Catalog...[/blue]")
+        parser = GWASCatalogParser(gwas_dir, p_value_threshold=5e-8)
+        self.parsers['gwas'] = parser
 
-            terms = defaultdict(set)
-            names = {}
+        terms = defaultdict(set)
+        names = {}
 
-            for assoc in track(
-                list(parser.parse_gene_disease_associations()),
-                description="Parsing GWAS",
-                disable=not self.verbose,
-            ):
-                terms[assoc.disease_id].add(assoc.gene_symbol)
-                names[assoc.disease_id] = assoc.disease_name
-                self.data['all_genes'].add(assoc.gene_symbol)
+        for assoc in track(
+            list(parser.parse_gene_disease_associations()),
+            description="Parsing GWAS",
+            disable=not self.verbose,
+        ):
+            terms[assoc.disease_id].add(assoc.gene_symbol)
+            names[assoc.disease_id] = assoc.disease_name
+            self.data['all_genes'].add(assoc.gene_symbol)
 
-            self.data['gwas']['terms_to_genes'] = dict(terms)
-            self.data['gwas']['term_names'] = names
+        self.data['gwas']['terms_to_genes'] = dict(terms)
+        self.data['gwas']['term_names'] = names
 
-            self._print(f"[green]✓ Loaded {len(terms)} traits from GWAS Catalog[/green]")
+        self._print(f"[green]✓ Loaded {len(terms)} traits from GWAS Catalog[/green]")
 
-        except Exception as e:
-            self._print(f"[red]✗ Failed to load GWAS: {e}[/red]")
 
     def _load_orphanet(self, orphanet_dir: Path):
         """Load Orphanet database."""
-        try:
-            self._print("[blue]Loading Orphanet...[/blue]")
-            parser = OrphanetParser(orphanet_dir)
-            self.parsers['orphanet'] = parser
+        self._print("[blue]Loading Orphanet...[/blue]")
+        parser = OrphanetParser(orphanet_dir)
+        self.parsers['orphanet'] = parser
 
-            terms = defaultdict(set)
-            names = {}
+        terms = defaultdict(set)
+        names = {}
 
-            for assoc in track(
-                list(parser.parse_gene_disease_associations()),
-                description="Parsing Orphanet",
-                disable=not self.verbose,
-            ):
-                terms[assoc.disease_id].add(assoc.gene_symbol)
-                names[assoc.disease_id] = assoc.disease_name
-                self.data['all_genes'].add(assoc.gene_symbol)
+        for assoc in track(
+            list(parser.parse_gene_disease_associations()),
+            description="Parsing Orphanet",
+            disable=not self.verbose,
+        ):
+            terms[assoc.disease_id].add(assoc.gene_symbol)
+            names[assoc.disease_id] = assoc.disease_name
+            self.data['all_genes'].add(assoc.gene_symbol)
 
-            self.data['orphanet']['terms_to_genes'] = dict(terms)
-            self.data['orphanet']['term_names'] = names
+        self.data['orphanet']['terms_to_genes'] = dict(terms)
+        self.data['orphanet']['term_names'] = names
 
-            self._print(f"[green]✓ Loaded {len(terms)} rare diseases from Orphanet[/green]")
+        self._print(f"[green]✓ Loaded {len(terms)} rare diseases from Orphanet[/green]")
 
-        except Exception as e:
-            self._print(f"[red]✗ Failed to load Orphanet: {e}[/red]")
 
     def _load_string(self, string_dir: Path):
         """Load STRING database."""
-        try:
-            self._print("[blue]Loading STRING...[/blue]")
-            self.string_parser = STRINGParser(string_dir, score_threshold=400)
-            self._print("[green]✓ STRING database ready[/green]")
+        self._print("[blue]Loading STRING...[/blue]")
+        self.string_parser = STRINGParser(string_dir, score_threshold=400)
+        self._print("[green]✓ STRING database ready[/green]")
 
-        except Exception as e:
-            self._print(f"[red]✗ Failed to load STRING: {e}[/red]")
 
     def _load_clinvar(self, clinvar_dir: Path):
         """Load ClinVar database."""
-        try:
-            self._print("[blue]Loading ClinVar...[/blue]")
-            parser = ClinVarParser(clinvar_dir, pathogenic_only=True)
-            self.parsers['clinvar'] = parser
+        self._print("[blue]Loading ClinVar...[/blue]")
+        parser = ClinVarParser(clinvar_dir, pathogenic_only=True)
+        self.parsers['clinvar'] = parser
 
-            terms = defaultdict(set)
-            names = {}
+        terms = defaultdict(set)
+        names = {}
 
-            # ClinVar is large - limit parsing to avoid memory issues
-            count = 0
-            max_variants = 100000  # Limit to first 100k variants
+        # ClinVar is large - limit parsing to avoid memory issues
+        count = 0
+        max_variants = 100000  # Limit to first 100k variants
 
-            for assoc in parser.parse_gene_disease_associations():
-                if count >= max_variants:
-                    break
+        for assoc in parser.parse_gene_disease_associations():
+            if count >= max_variants:
+                break
 
-                terms[assoc.disease_id].add(assoc.gene_symbol)
-                names[assoc.disease_id] = assoc.disease_name
-                self.data['all_genes'].add(assoc.gene_symbol)
-                count += 1
+            terms[assoc.disease_id].add(assoc.gene_symbol)
+            names[assoc.disease_id] = assoc.disease_name
+            self.data['all_genes'].add(assoc.gene_symbol)
+            count += 1
 
-                # Progress update every 10k
-                if count % 10000 == 0 and self.verbose:
-                    console.print(f"  Parsed {count:,} variants...", end='\r')
+            # Progress update every 10k
+            if count % 10000 == 0 and self.verbose:
+                console.print(f"  Parsed {count:,} variants...", end='\r')
 
-            self.data['clinvar']['terms_to_genes'] = dict(terms)
-            self.data['clinvar']['term_names'] = names
+        self.data['clinvar']['terms_to_genes'] = dict(terms)
+        self.data['clinvar']['term_names'] = names
 
-            self._print(f"[green]✓ Loaded {len(terms)} conditions from ClinVar ({count:,} variants)[/green]")
+        self._print(f"[green]✓ Loaded {len(terms)} conditions from ClinVar ({count:,} variants)[/green]")
 
-        except Exception as e:
-            self._print(f"[red]✗ Failed to load ClinVar: {e}[/red]")
 
     def _load_monarch(self, monarch_dir: Path):
         """Load Monarch database."""
-        try:
-            self._print("[blue]Loading Monarch...[/blue]")
-            parser = MonarchParser(monarch_dir, format='duckdb')
-            self.parsers['monarch'] = parser
+        self._print("[blue]Loading Monarch...[/blue]")
+        parser = MonarchParser(monarch_dir, format='duckdb')
+        self.parsers['monarch'] = parser
 
-            # Monarch is large (1M+ nodes, 14M+ edges)
-            # We'll load it on-demand during validation using build_gene_disease_index()
-            # This method is called during validate_gene_set to query diseases for specific genes
+        # Monarch is large (1M+ nodes, 14M+ edges)
+        # We'll load it on-demand during validation using build_gene_disease_index()
+        # This method is called during validate_gene_set to query diseases for specific genes
 
-            self._print("[green]✓ Monarch database ready (on-demand queries)[/green]")
+        self._print("[green]✓ Monarch database ready (on-demand queries)[/green]")
 
-        except Exception as e:
-            self._print(f"[red]✗ Failed to load Monarch: {e}[/red]")
 
     def _load_open_targets(self, open_targets_dir: Path):
         """Load Open Targets database."""
-        try:
-            self._print("[blue]Loading Open Targets...[/blue]")
-            parser = OpenTargetsParser(open_targets_dir, score_threshold=0.2)
-            self.parsers['open_targets'] = parser
+        self._print("[blue]Loading Open Targets...[/blue]")
+        parser = OpenTargetsParser(open_targets_dir, score_threshold=0.2)
+        self.parsers['open_targets'] = parser
 
-            # Open Targets is large (39K diseases, 78K targets, millions of associations)
-            # We'll load it on-demand during validation to avoid memory issues
+        # Open Targets is large (39K diseases, 78K targets, millions of associations)
+        # We'll load it on-demand during validation to avoid memory issues
 
-            self._print("[green]✓ Open Targets database ready (on-demand queries)[/green]")
+        self._print("[green]✓ Open Targets database ready (on-demand queries)[/green]")
 
-        except Exception as e:
-            self._print(f"[red]✗ Failed to load Open Targets: {e}[/red]")
 
     def validate_gene_set(
         self,

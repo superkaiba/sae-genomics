@@ -62,45 +62,43 @@ class HPOParser(DatabaseParser):
             GenePhenotypeAssociation objects
         """
         with open(self.genes_to_phenotype_file, 'r', encoding='utf-8') as f:
-            # Skip header
-            header = f.readline()
-
+            # Process all lines - check each line to see if it's a header
             for line in f:
+                # Skip comment lines and header lines
+                if line.startswith('#') or 'ncbi_gene_id' in line.lower() or 'gene_symbol' in line.lower():
+                    continue
+
                 parts = line.strip().split('\t')
 
                 if len(parts) < 4:
                     continue
 
-                ncbi_gene_id = parts[0]  # Entrez Gene ID
+                ncbi_gene_id = parts[0]
                 gene_symbol = parts[1]
-                hpo_id = parts[2]  # e.g., "HP:0001234"
+                hpo_id = parts[2]
                 hpo_name = parts[3]
-
-                # Optional fields
                 frequency = parts[4] if len(parts) > 4 else None
                 disease_id = parts[5] if len(parts) > 5 else None
                 qualifier = parts[6] if len(parts) > 6 else None
                 aspect = parts[7] if len(parts) > 7 else None
-                evidence = parts[9] if len(parts) > 9 else None  # Evidence code
+                evidence = parts[9] if len(parts) > 9 else None
 
-                # PMIDs
-                pmids = []
-                if len(parts) > 10 and parts[10]:
-                    pmids = [p.strip() for p in parts[10].split(';') if p.strip()]
+                if qualifier and qualifier.strip() == 'NOT':
+                    # Skip negative associations
+                    continue
 
                 yield GenePhenotypeAssociation(
-                    gene_id=ncbi_gene_id,  # Will be mapped to Ensembl later
+                    gene_id=ncbi_gene_id,
                     gene_symbol=gene_symbol,
                     phenotype_id=hpo_id,
                     phenotype_name=hpo_name,
                     source='hpo',
-                    evidence_code=evidence,
                     frequency=frequency,
-                    pmids=pmids,
+                    evidence_code=evidence,
                     metadata={
                         'disease_id': disease_id,
-                        'qualifier': qualifier,
                         'aspect': aspect,
+                        'qualifier': qualifier,
                     }
                 )
 
@@ -117,10 +115,11 @@ class HPOParser(DatabaseParser):
             return
 
         with open(self.genes_to_disease_file, 'r', encoding='utf-8') as f:
-            # Skip header
-            header = f.readline()
-
+            # Process all lines - check each line to see if it's a header
             for line in f:
+                # Skip comment lines and header lines
+                if line.startswith('#') or 'ncbi_gene_id' in line.lower() or 'gene_symbol' in line.lower():
+                    continue
                 parts = line.strip().split('\t')
 
                 if len(parts) < 4:

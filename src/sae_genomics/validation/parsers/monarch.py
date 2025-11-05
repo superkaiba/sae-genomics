@@ -48,10 +48,20 @@ class MonarchParser:
         else:
             raise ValueError(f"Unsupported format: {format}")
 
-    def __del__(self):
-        """Close database connection."""
-        if hasattr(self, 'conn'):
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - close database connection."""
+        self.close()
+        return False
+
+    def close(self):
+        """Explicitly close the database connection."""
+        if hasattr(self, 'conn') and self.conn:
             self.conn.close()
+            self.conn = None
 
     def query_gene_diseases(
         self,
